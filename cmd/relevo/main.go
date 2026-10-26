@@ -24,7 +24,7 @@ import (
 	"relevo/internal/wintray"
 )
 
-const version = "0.12.6-experimental"
+const version = "0.13.0-experimental"
 
 func closeCapture(source desktop.Source, prior error) error {
 	if source == nil {
@@ -48,6 +48,7 @@ func main() {
 }
 
 func run() int {
+	displayDevice := flag.String("display-device", "", "internal dedicated monitor adapter operation")
 	uacProbe := flag.Bool("uac-probe", false, "internal no-op used by the explicit GUI UAC check")
 	duration := flag.Duration("duration", 20*time.Second, "video duration (1s..5m)")
 	fps := flag.Int("fps", 20, "requested JPEG video frames per second (1..60)")
@@ -68,6 +69,22 @@ func run() int {
 	quality := flag.Int("quality", 70, "JPEG quality 1..100 (Windows capture)")
 	position := flag.String("position", "right", "virtual display position: right,left,above,below (Windows)")
 	flag.Parse()
+	if *displayDevice != "" {
+		if *displayDevice != "enable" && *displayDevice != "disable" {
+			return 2
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := windriver.SetDeviceEnabled(ctx, *displayDevice == "enable", nil); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			var nativeErr *windriver.NativeDeviceError
+			if errors.As(err, &nativeErr) && nativeErr.Code <= 0xffff {
+				return int(0x10000 | nativeErr.Code)
+			}
+			return 1
+		}
+		return 0
+	}
 	if *uacProbe {
 		return 0
 	}

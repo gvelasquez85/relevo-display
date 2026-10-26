@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,19 +9,28 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"relevo/internal/windriver"
 )
 
 // Session logs can predate the running program. Keep their original version
 // and identify the exporter separately so old logs never imply a new run.
 type diagnosticIdentity struct {
-	Version          string
-	ProcessID        int
-	ExecutableName   string
-	ExecutableSHA256 string
+	Version                 string
+	ProcessID               int
+	ExecutableName          string
+	ExecutableSHA256        string
+	MonitorDeviceState      *windriver.DeviceState `json:",omitempty"`
+	MonitorDeviceStateError string                 `json:",omitempty"`
 }
 
 func currentDiagnosticIdentity() diagnosticIdentity {
 	id := diagnosticIdentity{Version: version, ProcessID: os.Getpid()}
+	state, stateErr := windriver.ReadDeviceState(context.Background())
+	if stateErr != nil {
+		id.MonitorDeviceStateError = stateErr.Error()
+	} else {
+		id.MonitorDeviceState = &state
+	}
 	path, err := os.Executable()
 	if err != nil {
 		return id

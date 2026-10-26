@@ -15,10 +15,11 @@ import (
 )
 
 type Options struct {
-	OpenYamTests     func(Settings)
-	OpenTests        func()
-	ExportDiagnostic func() error
-	Title            string
+	DisconnectMonitor func() error
+	OpenYamTests      func(Settings)
+	OpenTests         func()
+	ExportDiagnostic  func() error
+	Title             string
 	// Start blocks until stopped or the display session ends. It runs off the UI thread.
 	Start   func(settings Settings, stop <-chan struct{}, report func(string)) error
 	Install func() error
@@ -176,7 +177,7 @@ func Run(o Options) error {
 	defer syscall.CloseHandle(syscall.Handle(singleton))
 	settings, loadErr := LoadSettings()
 	var hwnd, status, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, startButton, stopButton, installButton, saveButton, testsButton, yamTestsButton uintptr
-	var active, installing, closing, testsOpen bool
+	var active, installing, disconnecting, closing, testsOpen bool
 	var stop chan struct{}
 	var mu sync.Mutex
 	var result error
@@ -185,6 +186,7 @@ func Run(o Options) error {
 	const finished = 0x8002
 	const installed = 0x8003
 	const progress = 0x8004
+	const disconnected = 0x8005
 	instance, _, _ := k.NewProc("GetModuleHandleW").Call(0)
 	hi := monitorIcon(instance)
 	if hi == 0 {
@@ -202,16 +204,29 @@ func Run(o Options) error {
 		if installing {
 			text = "Preparando controlador…"
 		}
+		if disconnecting {
+			text = "Desconectando dispositivo de pantalla… Windows puede solicitar permisos de administrador."
+		}
 		setText(status, text)
 		enabled := uintptr(1)
-		if active || installing {
+		if active || installing || disconnecting {
 			enabled = 0
 		}
 		for _, h := range []uintptr{startButton, installButton, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, saveButton, testsButton, yamTestsButton} {
 			call("EnableWindow", h, enabled)
 		}
 		en := uintptr(0)
-		if active && stop != nil {
+
+		mode := settings.Mode
+		if modeCombo != 0 {
+			index := call("SendMessageW", modeCombo, 0x147, 0, 0)
+			if index == 0 {
+				mode = "extend"
+			} else if index == 1 {
+				mode = "desktop"
+			}
+		}
+		if !installing && !disconnecting && !closing && ((active && stop != nil) || (!active && mode == "extend" && o.DisconnectMonitor != nil)) {
 			en = 1
 		}
 		call("EnableWindow", stopButton, en)
@@ -247,7 +262,7 @@ func Run(o Options) error {
 		return s
 	}
 	quit := func() {
-		if active || installing {
+		if active || installing || disconnecting {
 			closing = true
 			if stop != nil {
 				close(stop)
@@ -274,9 +289,12 @@ func Run(o Options) error {
 		if testsOpen && id != 7 {
 			return
 		}
+		if disconnecting && id != 6 && id != 7 && id != 10 {
+			return
+		}
 		switch id {
 		case 1:
-			if active || installing || o.Start == nil {
+			if active || installing || disconnecting || o.Start == nil {
 				return
 			}
 			settings = read()
@@ -307,9 +325,26 @@ func Run(o Options) error {
 				stop = nil
 				setText(status, "Deteniendo y restaurando la pantalla…")
 				call("EnableWindow", stopButton, 0)
+				return
 			}
+			if active || installing || disconnecting || o.DisconnectMonitor == nil {
+				return
+			}
+			settings = read()
+			if settings.Mode != "extend" {
+				return
+			}
+			disconnecting = true
+			update()
+			go func() {
+				e := o.DisconnectMonitor()
+				mu.Lock()
+				result = e
+				mu.Unlock()
+				call("PostMessageW", hwnd, disconnected, 0, 0)
+			}()
 		case 3:
-			if active || installing {
+			if active || installing || disconnecting {
 				return
 			}
 			installing = true
@@ -340,7 +375,7 @@ func Run(o Options) error {
 		case 7:
 			show()
 		case 9:
-			if active || installing || o.OpenTests == nil {
+			if active || installing || disconnecting || o.OpenTests == nil {
 				return
 			}
 			testsOpen = true
@@ -351,7 +386,7 @@ func Run(o Options) error {
 			notify(0)
 			show()
 		case 11:
-			if active || installing || o.OpenYamTests == nil {
+			if active || installing || disconnecting || o.OpenYamTests == nil {
 				return
 			}
 			settings = read()
@@ -372,8 +407,13 @@ func Run(o Options) error {
 					message(hwnd, e.Error())
 				}
 			}
+		case 23:
+			if !active && !installing && !disconnecting {
+				settings = read()
+				update()
+			}
 		case 8:
-			if active || installing {
+			if active || installing || disconnecting {
 				return
 			}
 			settings = read()
@@ -411,7 +451,7 @@ func Run(o Options) error {
 					text string
 				}{{7, "Abrir Relevo Display"}, {1, "Iniciar pantalla"}, {2, "Detener"}, {6, "Salir"}} {
 					flags := uintptr(0)
-					if item.id == 1 && (active || installing) || item.id == 2 && !active {
+					if item.id == 1 && (active || installing || disconnecting) || item.id == 2 && (installing || disconnecting || closing || (active && stop == nil) || (!active && (settings.Mode != "extend" || o.DisconnectMonitor == nil))) {
 						flags = 1
 					}
 					call("AppendMenuW", menu, flags, item.id, uintptr(unsafe.Pointer(p(item.text))))
@@ -432,15 +472,17 @@ func Run(o Options) error {
 				setText(status, text)
 			}
 			return 0
-		case finished, installed:
+		case finished, installed, disconnected:
 			mu.Lock()
 			e := result
 			mu.Unlock()
 			if m == finished {
 				active = false
 				stop = nil
-			} else {
+			} else if m == installed {
 				installing = false
+			} else {
+				disconnecting = false
 			}
 			update()
 			if closing {
@@ -450,6 +492,8 @@ func Run(o Options) error {
 				show()
 			} else if m == installed {
 				message(h, "Controlador preparado. Reinicia Windows antes de iniciar la pantalla extendida.")
+			} else if m == disconnected || m == finished && settings.Mode == "extend" {
+				setText(status, "Monitor virtual desconectado.")
 			}
 			return 0
 		case 0x10:

@@ -147,7 +147,7 @@ func RunLab(o LabOptions) error {
 		}
 	}
 	setText := func(h uintptr, s string) { call("SetWindowTextW", h, uintptr(unsafe.Pointer(p(s)))) }
-	logText := "Listo. Elige una prueba. " + intro
+	logText := title + "\r\nListo. Elige una prueba. " + intro
 	appendLog := func(s string) {
 		s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
 		logText += "\r\n" + s

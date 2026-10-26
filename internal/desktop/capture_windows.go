@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/jpeg"
 	"relevo/internal/jpegfast"
+	"relevo/internal/windriver"
 	"relevo/internal/winvirtual"
 	"runtime"
 	"sync"
@@ -69,7 +70,7 @@ type winSource struct {
 	rgba           []byte
 }
 
-func Open(ctx context.Context, opt Options) (Source, error) {
+func Open(ctx context.Context, opt Options) (source Source, result error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := ctx.Err(); err != nil {
@@ -88,21 +89,50 @@ func Open(ctx context.Context, opt Options) (Source, error) {
 		return nil, err
 	}
 	if opt.Mode == "extend" {
-		handle, err := acquireVirtualMutex()
+		var handle syscall.Handle
+		handle, err = acquireVirtualMutex()
 		if err != nil {
+			return nil, err
+		}
+		ready := false
+		defer func() {
+			if !ready {
+				// A canceled start can finish enabling PnP before cancellation
+				// is observed. Complete its inverse before releasing ownership.
+				cleanupErr := windriver.EnsureDeviceEnabled(context.Background(), false, opt.Log)
+				result = errors.Join(result, cleanupErr, syscall.CloseHandle(handle))
+			}
+		}()
+		if err = windriver.EnsureDeviceEnabled(ctx, true, opt.Log); err != nil {
 			return nil, err
 		}
 		b := windowsDisplayBackend{log: opt.Log}
-		mode, err := virtualCaptureMode(ctx, b, width, height)
+		var mode winvirtual.Mode
+		// PnP may report STARTED before its display source is enumerated.
+		startDeadline := time.Now().Add(5 * time.Second)
+		for {
+			mode, err = virtualCaptureMode(ctx, b, width, height)
+			if err == nil {
+				break
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if time.Now().After(startDeadline) {
+				return nil, err
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+		var lease *winvirtual.Lease
+		lease, err = winvirtual.AcquirePosition(ctx, b, mode.Width, mode.Height, opt.Position)
 		if err != nil {
-			syscall.CloseHandle(handle)
 			return nil, err
 		}
-		lease, err := winvirtual.AcquirePosition(ctx, b, mode.Width, mode.Height, opt.Position)
-		if err != nil {
-			syscall.CloseHandle(handle)
-			return nil, err
-		}
+		ready = true
 		return &winSource{lease: lease, backend: b, mutex: handle, width: width, height: height, paused: pause.Bytes(), quality: quality, log: opt.Log}, nil
 	}
 	if opt.Mode != "desktop" {
@@ -310,7 +340,9 @@ func (s *winSource) Close() error {
 	s.closed = true
 	s.releaseCaptureResources()
 	if s.lease != nil {
-		s.closeErr = s.lease.CloseDetached()
+		// Retire the dedicated PnP adapter, not only its desktop path.
+		// Camera, audio, microphone and input devices use separate adapters.
+		s.closeErr = windriver.EnsureDeviceEnabled(context.Background(), false, s.log)
 	}
 	if s.mutex != 0 {
 		s.closeErr = errors.Join(s.closeErr, syscall.CloseHandle(s.mutex))
