@@ -449,9 +449,8 @@ func Run(o Options) error {
 			if closing {
 				quit()
 			} else if e != nil {
-				setText(status, "Error. Revisa el mensaje para más detalles.")
+				setText(status, "La sesión terminó con error. Puedes volver a iniciar, abrir pruebas o exportar diagnóstico.\r\n"+e.Error())
 				show()
-				message(h, e.Error())
 			} else if m == installed {
 				message(h, "Controlador preparado. Reinicia Windows antes de iniciar la pantalla extendida.")
 			}
@@ -539,7 +538,7 @@ func Run(o Options) error {
 	saveButton = child("BUTTON", "Guardar ajustes", 0x10000, 24, 264, 180, 32, 8)
 	startButton = child("BUTTON", "Iniciar pantalla", 0x10001, 24, 315, 180, 38, 1)
 	stopButton = child("BUTTON", "Detener", 0x10000, 220, 315, 130, 38, 2)
-	status = child("STATIC", "", 0, 24, 371, 486, 42, 0)
+	status = child("EDIT", "", 0x200000|0x4|0x40|0x800, 24, 371, 486, 42, 0) // Scrollable, read-only error/progress text; never a modal session error.
 	installButton = child("BUTTON", "Preparar controlador", 0x10000, 24, 425, 180, 32, 3)
 	child("BUTTON", "Pantallas de Windows", 0x10000, 220, 425, 160, 32, 4)
 	child("BUTTON", "Ayuda USB", 0x10000, 392, 425, 118, 32, 5)

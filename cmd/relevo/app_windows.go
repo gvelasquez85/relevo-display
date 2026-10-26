@@ -21,7 +21,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.12.1", Start: runTraySession, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.12.2", Start: runTraySession, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -182,7 +182,7 @@ func exportLastDiagnostic() error {
 	}
 	b, e := os.ReadFile(filepath.Join(dir, "last-session.json"))
 	if os.IsNotExist(e) {
-		return wintray.SaveDiagnostic("Relevo Display 0.12.1: todavía no se ha completado una sesión de pantalla.")
+		return wintray.SaveDiagnostic("Relevo Display 0.12.2: todavía no se ha completado una sesión de pantalla.")
 	}
 	if e != nil {
 		return e
