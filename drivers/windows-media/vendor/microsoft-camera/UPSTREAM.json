@@ -1,0 +1,76 @@
+{
+  "revision": "626f8b19c5f367602f2e89c6b314573d3776c9df",
+  "repo": "https://github.com/microsoft/Windows-Camera",
+  "files": [
+    {
+      "path": "SimpleFrameGenerator.cpp",
+      "sha256": "e72785afe65149369cba1053b53780a61ffa3fbe06bdd5c9d6da57d3adbef514",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/SimpleFrameGenerator.cpp"
+    },
+    {
+      "path": "SimpleFrameGenerator.h",
+      "sha256": "dd60164ca70815203e6d9f24d9f0424fae8002b3f29135d11dc833ca38a90f5a",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/SimpleFrameGenerator.h"
+    },
+    {
+      "path": "SimpleMediaSource.cpp",
+      "sha256": "65b7ee2dbacbeb17bafc415bc7c6e87c6564f091021ed65d5a9fa6200579d6e6",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/SimpleMediaSource.cpp"
+    },
+    {
+      "path": "SimpleMediaSource.h",
+      "sha256": "9497b687908f6e5d16ead9035ab621b1335ff5ffd7706359777087f2643451ed",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/SimpleMediaSource.h"
+    },
+    {
+      "path": "SimpleMediaStream.cpp",
+      "sha256": "847b94ee4cd738323ca603f254a048b063958293440f6c7eb876da00cad6df1a",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/SimpleMediaStream.cpp"
+    },
+    {
+      "path": "SimpleMediaStream.h",
+      "sha256": "fcf9273e9ba0c7fd4e0adeb28eb1ce7cbc3d71e8df51277e82fe5d468ed17ccd",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/SimpleMediaStream.h"
+    },
+    {
+      "path": "VirtualCameraMediaSource.def",
+      "sha256": "723324d0d14aa66232ecc344136cb4c97621af65256558169e8ac5fa78fdffd1",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/VirtualCameraMediaSource.def"
+    },
+    {
+      "path": "VirtualCameraMediaSource.h",
+      "sha256": "45eda756a9e1594cf59fba6ed5ef32da1e2fc1ebe170ec582bf89e4b3f3ee47e",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/VirtualCameraMediaSource.h"
+    },
+    {
+      "path": "VirtualCameraMediaSourceActivate.cpp",
+      "sha256": "227b8d75e9b9f968d8252fb69f182b7136d12f64431c020192871ceac331392a",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/VirtualCameraMediaSourceActivate.cpp"
+    },
+    {
+      "path": "VirtualCameraMediaSourceActivate.h",
+      "sha256": "1af887e45b62a7f04f1e35edfa0f1583e054b4c90a8bc4615bb0d9e0d3465ed1",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/VirtualCameraMediaSourceActivate.h"
+    },
+    {
+      "path": "dllmain.cpp",
+      "sha256": "dba287e9840018fafc7b6635d3392bb24528b4b348028ae67075d4ddad053310",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/dllmain.cpp"
+    },
+    {
+      "path": "pch.cpp",
+      "sha256": "eb7bc990f00bc6fd2de0f6e793d994c9e6c3121586ffb3df107c1b1a475e5401",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/pch.cpp"
+    },
+    {
+      "path": "pch.h",
+      "sha256": "f79118c41f7764654ff5f444aea676e9a878a4db330efe782a78d6518ac00dbf",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/pch.h"
+    },
+    {
+      "path": "winrtCommon.cpp",
+      "sha256": "3fe17b367dc8181d422dea18a7a49e026779114e0f4e9c5d18a65d10bfec75f9",
+      "upstream_path": "Samples/VirtualCamera/VirtualCameraMediaSource/winrtCommon.cpp"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+* text=auto
+*.dll binary
+*.zip binary
+*.syso binary
+*.ico binary
+*.png binary
+# Preserve pinned upstream bytes; source preparation verifies their SHA256.
+drivers/windows-media/vendor/** -text -whitespace
+internal/jpegfast/assets/LICENSE.md -text -whitespace
+internal/windriver/assets/LICENSE -text -whitespace
+THIRD_PARTY_NOTICES.txt -text -whitespace

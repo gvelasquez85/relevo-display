@@ -1,0 +1,27 @@
+.tools/
+dist/
+*.tmp
+clients/ios/build/
+
+# Local diagnostics, downloaded tools and private signing material
+.DS_Store
+analysis/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.pfx
+*.key
+*.pem
+*.cer
+*.xip
+*.dmg
+*.ipa
+*.xcarchive/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+drivers/windows-media/build*/

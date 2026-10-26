@@ -1,0 +1,15 @@
+{
+  "project": "libjpeg-turbo",
+  "version": "3.2.0",
+  "official_release": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/tag/3.2.0",
+  "release_api": "https://api.github.com/repos/libjpeg-turbo/libjpeg-turbo/releases/tags/3.2.0",
+  "asset_url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0-gcc-x64.exe",
+  "asset_sha256": "5a71ea596c573ea3b44c8e7b5e78613d3a28dc9490dc714e7222c9f63f55e454",
+  "digest_source": "official GitHub release API asset digest field, checked 2026-10-24",
+  "embedded_path": "bin/libturbojpeg.dll",
+  "embedded_sha256": "4fd997c7eec636d3c48a9fc604b6cb573da030f2f6382d4ed07397c7d7f4e50e",
+  "imports": ["KERNEL32.dll", "msvcrt.dll"],
+  "inspection": "Apple llvm-objdump -p, PE32+ x86-64, required TurboJPEG exports present",
+  "runtime_validation": "not run: development host is macOS arm64",
+  "reproduce": "python3 scripts/fetch-turbojpeg.py"
+}

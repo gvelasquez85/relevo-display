@@ -1,0 +1,17 @@
+[
+  {
+    "repo": "microsoft/Windows-Camera",
+    "revision": "626f8b19c5f367602f2e89c6b314573d3776c9df",
+    "license_path": "LICENSE",
+    "source_only_reference": false,
+    "vendored_implementation": true,
+    "scope": "14-file synthetic COM source baseline, deterministic adaptation under tools/prepare_camera_source.py"
+  },
+  {
+    "repo": "microsoft/Windows-driver-samples",
+    "revision": "bb68ed5e770bce04dc5395ec9258dafab034184d",
+    "license_path": "LICENSE",
+    "source_only_reference": true,
+    "vendored_implementation": false
+  }
+]
