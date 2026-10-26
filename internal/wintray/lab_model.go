@@ -15,6 +15,11 @@ type LabSettings struct {
 
 // LabOptions supplies the native session and USB diagnostic without coupling the UI to transport.
 type LabOptions struct {
+	Profiles                   []LabProfile
+	Validate                   func(LabSettings) error
+	Title, Intro, Footer       string
+	ActionLabel, ActionProfile string
+	Action                     func() error
 	// Embedded returns to the main Relevo window on close.
 	Embedded bool
 	// Preview carries bounded latest JPEG frames; the producer retains ownership until send.
@@ -23,7 +28,9 @@ type LabOptions struct {
 	Check   func() (string, error)
 }
 
-var labProfiles = []struct{ ID, Label string }{
+type LabProfile struct{ ID, Label string }
+
+var labProfiles = []LabProfile{
 	{"pattern", "Pantalla de prueba"},
 	{"extend", "Pantalla extendida + entrada"},
 	{"input", "Touch/teclado/mouse (pantalla actual)"},
@@ -34,9 +41,25 @@ var labProfiles = []struct{ ID, Label string }{
 var labFPS = []int{30, 60}
 var labQuality = []int{60, 70, 80, 90, 95, 100}
 
-func (s LabSettings) Validate() error {
+func (s LabSettings) Validate() error { return validateLabSettings(s, labProfiles) }
+
+// YamProfiles returns an independent list of compatible-client checks.
+func YamProfiles() []LabProfile {
+	return []LabProfile{
+		{"performance30", "Comparar fluidez a 30 FPS"},
+		{"performance60", "Comparar fluidez a 60 FPS"},
+		{"display", "Pantalla: resolución, modo y posición"},
+		{"disconnect", "Desconexión y recuperación"},
+		{"uac", "Recuperación después de UAC"},
+		{"input", "Investigar touch, gestos y teclado"},
+	}
+}
+
+func ValidateYamSettings(s LabSettings) error { return validateLabSettings(s, YamProfiles()) }
+
+func validateLabSettings(s LabSettings, profiles []LabProfile) error {
 	known := false
-	for _, p := range labProfiles {
+	for _, p := range profiles {
 		known = known || s.Profile == p.ID
 	}
 	if !known {
@@ -81,4 +104,9 @@ func decodeLabPreview(data []byte) ([]byte, int, int, error) {
 		}
 	}
 	return pixels, cfg.Width, cfg.Height, nil
+}
+
+// actionEnabled scopes a host action to its active trial and cleanup state.
+func (o LabOptions) actionEnabled(profile string, busy, checking, closing, stoppable bool) bool {
+	return o.Action != nil && busy && !checking && !closing && stoppable && (o.ActionProfile == "" || o.ActionProfile == profile)
 }

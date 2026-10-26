@@ -8,7 +8,7 @@ assert exe.is_file() and exe.read_bytes()[:2]==b'MZ'
 archive=dist/'archive'/datetime.datetime.now().strftime('%Y%m%d-pre-unified')
 archive.mkdir(parents=True,exist_ok=True)
 for p in list(dist.iterdir()):
- if p.is_file() and p.name not in {exe.name,bundle.name}:
+ if p.is_file() and p.name not in {exe.name,bundle.name,"Relevo-iPad.ipa"}:
   target=archive/p.name
   if target.exists():continue
   shutil.move(str(p),str(target))

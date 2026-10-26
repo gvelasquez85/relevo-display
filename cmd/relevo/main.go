@@ -24,7 +24,7 @@ import (
 	"relevo/internal/wintray"
 )
 
-const version = "0.11.0-experimental"
+const version = "0.12.0-experimental"
 
 func closeCapture(source desktop.Source, prior error) error {
 	if source == nil {
@@ -48,6 +48,7 @@ func main() {
 }
 
 func run() int {
+	uacProbe := flag.Bool("uac-probe", false, "internal no-op used by the explicit GUI UAC check")
 	duration := flag.Duration("duration", 20*time.Second, "video duration (1s..5m)")
 	fps := flag.Int("fps", 20, "requested JPEG video frames per second (1..60)")
 	doctor := flag.Bool("doctor", false, "list local USB transports without connecting to iPad")
@@ -67,6 +68,9 @@ func run() int {
 	quality := flag.Int("quality", 70, "JPEG quality 1..100 (Windows capture)")
 	position := flag.String("position", "right", "virtual display position: right,left,above,below (Windows)")
 	flag.Parse()
+	if *uacProbe {
+		return 0
+	}
 	if *versionFlag {
 		fmt.Println("Relevo Display", version)
 		return 0

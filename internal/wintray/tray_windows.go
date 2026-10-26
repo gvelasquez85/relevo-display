@@ -13,6 +13,7 @@ import (
 )
 
 type Options struct {
+	OpenYamTests     func(Settings)
 	OpenTests        func()
 	ExportDiagnostic func() error
 	Title            string
@@ -177,7 +178,7 @@ func Run(o Options) error {
 		o.Title = "Relevo Display 0.9"
 	}
 	settings, loadErr := LoadSettings()
-	var hwnd, status, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, startButton, stopButton, installButton, saveButton, testsButton uintptr
+	var hwnd, status, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, startButton, stopButton, installButton, saveButton, testsButton, yamTestsButton uintptr
 	var active, installing, closing, testsOpen bool
 	var stop chan struct{}
 	var mu sync.Mutex
@@ -209,7 +210,7 @@ func Run(o Options) error {
 		if active || installing {
 			enabled = 0
 		}
-		for _, h := range []uintptr{startButton, installButton, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, saveButton, testsButton} {
+		for _, h := range []uintptr{startButton, installButton, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, saveButton, testsButton, yamTestsButton} {
 			call("EnableWindow", h, enabled)
 		}
 		en := uintptr(0)
@@ -352,6 +353,22 @@ func Run(o Options) error {
 			testsOpen = false
 			notify(0)
 			show()
+		case 11:
+			if active || installing || o.OpenYamTests == nil {
+				return
+			}
+			settings = read()
+			if e := SaveSettings(settings); e != nil {
+				message(hwnd, e.Error())
+				return
+			}
+			testsOpen = true
+			call("ShowWindow", hwnd, 0)
+			notify(2)
+			o.OpenYamTests(settings)
+			testsOpen = false
+			notify(0)
+			show()
 		case 10:
 			if o.ExportDiagnostic != nil {
 				if e := o.ExportDiagnostic(); e != nil {
@@ -456,7 +473,7 @@ func Run(o Options) error {
 		return fmt.Errorf("registrar ventana falló")
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(name)), instance)
-	hwnd = call("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(p(o.Title))), 0x00ca0000, 0x80000000, 0x80000000, 560, 625, 0, 0, instance, 0)
+	hwnd = call("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(p(o.Title))), 0x00ca0000, 0x80000000, 0x80000000, 560, 665, 0, 0, instance, 0)
 	if hwnd == 0 {
 		return fmt.Errorf("crear ventana falló")
 	}
@@ -528,7 +545,8 @@ func Run(o Options) error {
 	child("BUTTON", "Ayuda USB", 0x10000, 392, 425, 118, 32, 5)
 	testsButton = child("BUTTON", "Pruebas y nuevas funciones", 0x10000, 24, 470, 270, 34, 9)
 	child("BUTTON", "Exportar diagnóstico", 0x10000, 308, 470, 202, 34, 10)
-	child("STATIC", "Cerrar la ventana mantiene el icono junto al reloj. Para cerrar: icono → Salir.", 0, 24, 520, 490, 32, 0)
+	yamTestsButton = child("BUTTON", "Pruebas con Yam", 0x10000, 24, 514, 270, 34, 11)
+	child("STATIC", "Cerrar la ventana mantiene el icono junto al reloj. Para cerrar: icono → Salir.", 0, 24, 562, 490, 32, 0)
 	icon = nid{H: hwnd, ID: 1, Flags: 7, Callback: callback, Icon: hi}
 	icon.Size = uint32(unsafe.Sizeof(icon))
 	copy(icon.Tip[:], syscall.StringToUTF16(o.Title))

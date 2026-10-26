@@ -1,6 +1,6 @@
 # Arquitectura y desarrollo
 
-Estado de referencia: 25 de octubre de 2026. Relevo tiene dos rutas de recepción en el iPad: una compatible con la app instalada y otra con un cliente propio. Comparten módulos del host, pero sus protocolos y el estado de validación son diferentes.
+Estado de referencia: 26 de octubre de 2026. Relevo tiene dos rutas de recepción en el iPad: una compatible con la app instalada y otra con un cliente propio. Comparten módulos del host, pero sus protocolos y el estado de validación son diferentes.
 
 ## Componentes
 
@@ -59,3 +59,13 @@ El cliente iOS dispone de `clients/ios/build-with-sdk.sh` y un proyecto Xcode. S
 Los componentes C/C++ de medios se construyen mediante CMake. Sus pruebas portables verifican formatos, límites y colas; la parte de Windows requiere las herramientas y SDK/WDK indicados en su propio README. Compilar Go para Windows no verifica COM ni un controlador de audio.
 
 Antes de integrar cambios, ejecutar las comprobaciones pertinentes y registrar qué se probó realmente. Mantener los resultados del usuario dentro del GUI y el diagnóstico exportable. No incorporar al repositorio herramientas descargadas, SDKs, perfiles, certificados privados, credenciales, capturas personales ni artefactos de extracción de Xcode.
+
+## Comprobaciones con el receptor compatible (0.12)
+
+El panel `Pruebas con Yam` reutiliza el mismo runner y captura de la pantalla habitual. Ajusta resolución, modo y posición en la ventana principal; calidad y FPS se seleccionan en el panel. Las pruebas de 30/60 duran 20 segundos y sólo comparan configuraciones equivalentes. Desconexión, UAC y observación de entrada duran hasta 45 segundos. Detener no se marca como prueba completada.
+
+El diagnóstico de desconexión distingue eventos de bloqueo/segundo plano/cierre, pérdida de transporte, timeout de pong y fallo de formato. Sólo los primeros casos, tras vídeo real y limpieza sin error, se reportan como desconexión observada. Volver a conectar y empezar otra prueba comprueba una nueva sesión; no se promete reconexión automática.
+
+`desktop.CaptureStatus` cuenta pausas por inaccesibilidad/cambio del escritorio de entrada y su recuperación. No identifica por sí solo la causa UAC. La acción GUI solicita elevación del ejecutable con `--uac-probe`; ese modo termina antes de USB, captura o instalación. La aplicación no entra en el escritorio seguro. Las comprobaciones visuales de imagen, posición y reorganización de ventanas siguen siendo humanas.
+
+`yamchecks` resume métricas y esquemas de entrada con nombres/tipos aprobados. No guarda valores de teclas, texto o coordenadas. No habilita control de Windows mediante eventos Yam. La sesión interrumpe escrituras pendientes al cancelar y espera la salida del lector antes de retornar; la captura retira y verifica su pantalla antes de informar limpieza.

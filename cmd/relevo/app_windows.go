@@ -21,14 +21,23 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.11", Start: runTraySession, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.12", Start: runTraySession, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
 	if e != nil {
 		wintray.ShowError(e)
 	}
 	return true
 }
 
-func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func(string)) (err error) {
+type compatibleRunOptions struct {
+	Duration time.Duration
+	Observe  func(session.Stats, desktop.CaptureStatus) string
+	Complete func(session.Stats, desktop.CaptureStatus, bool, error)
+}
+
+func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func(string)) error {
+	return runCompatibleSession(settings, stop, report, compatibleRunOptions{})
+}
+func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, report func(string), opt compatibleRunOptions) (err error) {
 	if e := settings.Validate(); e != nil {
 		return e
 	}
@@ -39,6 +48,11 @@ func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func
 	report("Comprobando conexión USB…")
 	started := time.Now()
 	var stats session.Stats
+	var captureStatus desktop.CaptureStatus
+	var cleaned bool
+	if opt.Complete != nil {
+		defer func() { opt.Complete(stats, captureStatus, cleaned, err) }()
+	}
 	var selectedEncoder string
 	var events []string
 	log := func(s string) {
@@ -61,10 +75,11 @@ func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func
 			Stats                        session.Stats
 			Events                       []string
 			Error                        string
-			DisplayVerified              bool
+			CaptureCleanupConfirmed      bool
+			CaptureStatus                desktop.CaptureStatus
 			Settings                     wintray.Settings
 			Encoder                      string
-		}{Version: version, Resolution: resolution, Started: started.Format(time.RFC3339), Stats: stats, Events: events, RequestedFPS: settings.FPS, JPEGQuality: settings.Quality, Settings: settings, Encoder: selectedEncoder}
+		}{Version: version, Resolution: resolution, Started: started.Format(time.RFC3339), Stats: stats, Events: events, RequestedFPS: settings.FPS, JPEGQuality: settings.Quality, Settings: settings, Encoder: selectedEncoder, CaptureCleanupConfirmed: cleaned, CaptureStatus: captureStatus}
 		if err != nil {
 			result.Error = err.Error()
 		}
@@ -114,7 +129,19 @@ func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func
 	if e != nil {
 		return e
 	}
-	defer func() { err = closeCapture(source, err) }()
+	defer func() {
+		if info, ok := source.(interface{ CaptureStatus() desktop.CaptureStatus }); ok {
+			captureStatus = info.CaptureStatus()
+		}
+		cleanupErr := source.Close()
+		cleaned = cleanupErr == nil
+		err = errors.Join(err, cleanupErr)
+	}()
+	if opt.Duration > 0 {
+		timedCtx, stopTimer := context.WithTimeout(ctx, opt.Duration)
+		defer stopTimer()
+		ctx = timedCtx
+	}
 	if settings.KeepAwake {
 		release, e := wintray.AcquireAwake()
 		if e != nil {
@@ -128,12 +155,16 @@ func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func
 			encoder = info.EncoderName()
 		}
 		selectedEncoder = encoder
-		report(fmt.Sprintf("%.1f / %d FPS · %s · %s · Q%d\nCaptura p95: %.1f ms · escritura p95: %.1f ms", st.ActualFPS, settings.FPS, resolution, encoder, settings.Quality, st.CaptureP95Millis, st.WriteP95Millis))
+		if info, ok := source.(interface{ CaptureStatus() desktop.CaptureStatus }); ok {
+			captureStatus = info.CaptureStatus()
+		}
+		extra := ""
+		if opt.Observe != nil {
+			extra = opt.Observe(st, captureStatus)
+		}
+		report(fmt.Sprintf("%.1f / %d FPS · %s · %s · Q%d\nCaptura p95: %.1f ms · escritura p95: %.1f ms", st.ActualFPS, settings.FPS, resolution, encoder, settings.Quality, st.CaptureP95Millis, st.WriteP95Millis) + extra)
 	}, Frame: func(ctx context.Context, _ int) ([]byte, error) { return source.Next(ctx) }})
-	if errors.Is(err, context.Canceled) {
-		return nil
-	}
-	return err
+	return normalizeSessionError(ctx, err)
 }
 
 func exportLastDiagnostic() error {
@@ -143,7 +174,7 @@ func exportLastDiagnostic() error {
 	}
 	b, e := os.ReadFile(filepath.Join(dir, "last-session.json"))
 	if os.IsNotExist(e) {
-		return wintray.SaveDiagnostic("Relevo Display 0.11: todavía no se ha completado una sesión de pantalla.")
+		return wintray.SaveDiagnostic("Relevo Display 0.12: todavía no se ha completado una sesión de pantalla.")
 	}
 	if e != nil {
 		return e

@@ -5,6 +5,7 @@ package wintray
 import "fmt"
 
 type Options struct {
+	OpenYamTests     func(Settings)
 	OpenTests        func()
 	ExportDiagnostic func() error
 	Title            string

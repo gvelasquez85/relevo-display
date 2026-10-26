@@ -47,3 +47,46 @@ func TestLabPreviewRejectsInvalidAndOversizedFrames(t *testing.T) {
 		t.Fatalf("expected opaque BGRA red pixel, got %v", pixels[:4])
 	}
 }
+
+func TestYamProfilesAreIndependentAndValidateOnlyCompatibleChecks(t *testing.T) {
+	profiles := YamProfiles()
+	if len(profiles) != 6 {
+		t.Fatal("expected six GUI checks")
+	}
+	for _, p := range profiles {
+		if err := ValidateYamSettings(LabSettings{Profile: p.ID, FPS: 60, Quality: 100}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profiles[0].ID = "mutated"
+	if YamProfiles()[0].ID != "performance30" {
+		t.Fatal("shared mutable profile list")
+	}
+	for _, s := range []LabSettings{{Profile: "camera", FPS: 30, Quality: 70}, {Profile: "performance30", FPS: 45, Quality: 70}, {Profile: "display", FPS: 30, Quality: 101}} {
+		if ValidateYamSettings(s) == nil {
+			t.Fatalf("accepted invalid check %+v", s)
+		}
+	}
+	if (LabSettings{Profile: "performance30", FPS: 30, Quality: 70}).Validate() == nil {
+		t.Fatal("native profiles accept Yam check")
+	}
+}
+
+func TestLabActionRequiresMatchingRunningTrial(t *testing.T) {
+	o := LabOptions{Action: func() error { return nil }, ActionProfile: "uac"}
+	if !o.actionEnabled("uac", true, false, false, true) {
+		t.Fatal("running UAC action disabled")
+	}
+	for _, c := range []struct {
+		profile                            string
+		busy, checking, closing, stoppable bool
+	}{{"display", true, false, false, true}, {"uac", false, false, false, true}, {"uac", true, true, false, true}, {"uac", true, false, true, true}, {"uac", true, false, false, false}} {
+		if o.actionEnabled(c.profile, c.busy, c.checking, c.closing, c.stoppable) {
+			t.Fatalf("enabled invalid state %+v", c)
+		}
+	}
+	o.Action = nil
+	if o.actionEnabled("uac", true, false, false, true) {
+		t.Fatal("enabled absent action")
+	}
+}

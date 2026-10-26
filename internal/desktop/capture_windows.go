@@ -49,6 +49,7 @@ type bitmapInfo struct {
 }
 type winSource struct {
 	recovery       captureRecovery
+	status         CaptureStatus
 	rect           winRect
 	width, height  int
 	paused         []byte
@@ -158,7 +159,18 @@ func (s *winSource) Next(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	frame, err := guardedCapture(ctx, captureDesktopAvailable, func() ([]byte, error) { return s.captureFrame(ctx) }, s.paused)
+	unavailable := false
+	available := func() (bool, error) {
+		ok, e := captureDesktopAvailable()
+		if e == nil && !ok {
+			unavailable = true
+		}
+		return ok, e
+	}
+	frame, err := guardedCapture(ctx, available, func() ([]byte, error) { return s.captureFrame(ctx) }, s.paused)
+	if err == nil {
+		s.status.observe(unavailable)
+	}
 	return s.recovery.result(time.Now(), frame, err, s.paused)
 }
 
@@ -342,4 +354,10 @@ func winFitRectSize(width, height, outputWidth, outputHeight int32) winRect {
 	}
 	x, y := (int64(outputWidth)-w)/2, (int64(outputHeight)-h)/2
 	return winRect{int32(x), int32(y), int32(x + w), int32(y + h)}
+}
+
+func (s *winSource) CaptureStatus() CaptureStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status
 }

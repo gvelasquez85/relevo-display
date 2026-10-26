@@ -30,6 +30,7 @@ type Options struct {
 	Frame func(context.Context, int) ([]byte, error)
 }
 type Stats struct {
+	EndReason              string                       `json:"end_reason,omitempty"`
 	InputEventSchemas      map[string]map[string]string `json:"input_event_schemas,omitempty"`
 	PingP95Millis          float64                      `json:"control_roundtrip_recent_p95_ms"`
 	InputEventCounts       map[string]int               `json:"input_event_counts,omitempty"`
@@ -48,6 +49,16 @@ type Stats struct {
 	WriteP95Millis         float64                      `json:"write_recent_p95_ms"`
 	FrameIntervalP95Millis float64                      `json:"send_interval_recent_p95_ms"`
 }
+
+const (
+	EndCanceled         = "canceled"
+	EndPeerTimeout      = "peer_timeout"
+	EndTransportClosed  = "transport_closed"
+	EndReadFailure      = "read_failure"
+	EndDeviceTerminate  = "device_terminate"
+	EndDeviceLocked     = "device_locked"
+	EndDeviceBackground = "device_background"
+)
 
 func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 	defer c.Close()
@@ -115,7 +126,30 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 	var handshakeDeadline <-chan time.Time = handshakeTimer.C
 	received := make(chan wire.Frame, 8)
 	failed := make(chan error, 1)
+	readerDone := make(chan struct{})
+	watcherDone := make(chan struct{})
+	// Closing the transport interrupts a write blocked behind a suspended iPad,
+	// rather than making GUI Stop wait for the socket write deadline.
 	go func() {
+		defer close(watcherDone)
+		<-ctx.Done()
+		c.Close()
+	}()
+	defer func() {
+		ctxErr := ctx.Err()
+		cancel()
+		c.Close()
+		<-readerDone
+		<-watcherDone
+		if ctxErr != nil && err != nil {
+			st.EndReason = EndCanceled
+			err = fmt.Errorf("session ended: %w", ctxErr)
+		} else if st.EndReason == "" && (errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe)) {
+			st.EndReason = EndTransportClosed
+		}
+	}()
+	go func() {
+		defer close(readerDone)
 		for {
 			f, e := wire.Read(c)
 			if e != nil {
@@ -157,12 +191,19 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 	for {
 		select {
 		case <-ctx.Done():
+			st.EndReason = EndCanceled
 			return st, fmt.Errorf("session ended: %w", ctx.Err())
 		case <-peerDeadline:
+			st.EndReason = EndPeerTimeout
 			return st, errors.New("iPad not responding; display session disconnected")
 		case <-handshakeDeadline:
 			return st, errors.New("iPad handshake timed out: keep the compatible iPad app visible and close other desktop servers")
 		case e := <-failed:
+			st.EndReason = EndReadFailure
+			var networkError *net.OpError
+			if errors.Is(e, io.EOF) || errors.Is(e, io.ErrUnexpectedEOF) || errors.Is(e, net.ErrClosed) || errors.Is(e, io.ErrClosedPipe) || errors.As(e, &networkError) {
+				st.EndReason = EndTransportClosed
+			}
 			if errors.Is(e, io.EOF) {
 				return st, errors.New("iPad closed the display session")
 			}
@@ -325,6 +366,14 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 					st.DecoderErrors++
 					return st, errors.New("iPad reported ErrorDecoding: experimental payload rejected")
 				case "DeviceTerminate", "DeviceLocked", "DeviceBackground":
+					switch name {
+					case "DeviceTerminate":
+						st.EndReason = EndDeviceTerminate
+					case "DeviceLocked":
+						st.EndReason = EndDeviceLocked
+					case "DeviceBackground":
+						st.EndReason = EndDeviceBackground
+					}
 					return st, errors.New("iPad app stopped or entered background; keep the compatible iPad app visible")
 				case "SingleTap", "TwoFingerSingleTap", "SingleTap2nd", "Scrolled", "Dragged", "HoverEvent", "KeyboardEvent", "KeyboardPressEvent", "vKeyboardEvent", "vKeyboardSourceEvent", "Zoomed", "TwoFingerPanned", "TwoFingerRotated", "SwipeToChangeSpaceEvent":
 					if st.InputEventCounts == nil {

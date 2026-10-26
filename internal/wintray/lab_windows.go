@@ -33,7 +33,29 @@ type labBitmapInfo struct {
 func RunLab(o LabOptions) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	const title = "Relevo Display · Pruebas del cliente iPad"
+	title := o.Title
+	if title == "" {
+		title = "Relevo Display · Pruebas del cliente iPad"
+	}
+	profiles := o.Profiles
+	if len(profiles) == 0 {
+		profiles = labProfiles
+	}
+	if len(profiles) > 6 {
+		return fmt.Errorf("se admiten hasta seis pruebas")
+	}
+	validate := o.Validate
+	if validate == nil {
+		validate = func(s LabSettings) error { return validateLabSettings(s, profiles) }
+	}
+	intro := o.Intro
+	if intro == "" {
+		intro = "Requiere nuestra app Relevo abierta en el iPad por USB. Estas pruebas no funcionan con Yam."
+	}
+	footer := o.Footer
+	if footer == "" {
+		footer = "Wi-Fi y cámara/micrófono como dispositivos del sistema: todavía no disponibles. Cámara: sólo vista previa local."
+	}
 	const class = "RelevoNativeLaboratoryWindow"
 	const progress = 0x8101
 	const finished = 0x8102
@@ -59,7 +81,8 @@ func RunLab(o LabOptions) error {
 		return fmt.Errorf("crear icono de pruebas")
 	}
 	defer call("DestroyIcon", hi)
-	var hwnd, status, fps, quality, stopButton, checkButton uintptr
+	var hwnd, status, fps, quality, stopButton, checkButton, actionButton uintptr
+	var currentProfile string
 	var startButtons []uintptr
 	var busy, closing, checking, destroyed bool
 	var stop chan struct{}
@@ -124,7 +147,7 @@ func RunLab(o LabOptions) error {
 		}
 	}
 	setText := func(h uintptr, s string) { call("SetWindowTextW", h, uintptr(unsafe.Pointer(p(s)))) }
-	logText := "Listo. Abre Relevo en el iPad, inicia USB y elige una prueba."
+	logText := "Listo. Elige una prueba. " + intro
 	appendLog := func(s string) {
 		s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
 		logText += "\r\n" + s
@@ -151,6 +174,13 @@ func RunLab(o LabOptions) error {
 			en = 1
 		}
 		call("EnableWindow", stopButton, en)
+		actionEnabled := uintptr(0)
+		if o.actionEnabled(currentProfile, busy, checking, closing, stop != nil) {
+			actionEnabled = 1
+		}
+		if actionButton != 0 {
+			call("EnableWindow", actionButton, actionEnabled)
+		}
 	}
 	show := func() { call("ShowWindow", hwnd, 9); call("SetForegroundWindow", hwnd) }
 	destroy := func() {
@@ -205,7 +235,7 @@ func RunLab(o LabOptions) error {
 			return
 		}
 		s := LabSettings{Profile: profile, FPS: labFPS[fi], Quality: labQuality[qi]}
-		if err := s.Validate(); err != nil {
+		if err := validate(s); err != nil {
 			appendLog(err.Error())
 			return
 		}
@@ -217,13 +247,14 @@ func RunLab(o LabOptions) error {
 			call("ShowWindow", previewH, 1)
 			call("UpdateWindow", previewH)
 		}
+		currentProfile = profile
 		busy = true
 		checking = false
 		stop = make(chan struct{})
 		ch := stop
 		workerDone = make(chan struct{})
 		done := workerDone
-		for _, p := range labProfiles {
+		for _, p := range profiles {
 			if p.ID == profile {
 				appendLog("Iniciando: " + p.Label)
 			}
@@ -239,8 +270,8 @@ func RunLab(o LabOptions) error {
 		}()
 	}
 	command := func(id uintptr) {
-		if id >= 100 && id < 100+uintptr(len(labProfiles)) {
-			begin(labProfiles[id-100].ID)
+		if id >= 100 && id < 100+uintptr(len(profiles)) {
+			begin(profiles[id-100].ID)
 			return
 		}
 		switch id {
@@ -274,6 +305,13 @@ func RunLab(o LabOptions) error {
 		case 5:
 			if err := SaveDiagnostic(logText); err != nil {
 				message(hwnd, err.Error())
+			}
+		case 6:
+			if !o.actionEnabled(currentProfile, busy, checking, closing, stop != nil) {
+				return
+			}
+			if err := o.Action(); err != nil {
+				appendLog(err.Error())
 			}
 		case 4:
 			show()
@@ -453,8 +491,8 @@ func RunLab(o LabOptions) error {
 		call("SendMessageW", ch, 0x30, hf, 1)
 		return ch
 	}
-	child("STATIC", "Pruebas del cliente Relevo para iPad", 0, 24, 18, 680, 24, 0)
-	child("STATIC", "Requiere nuestra app Relevo abierta en el iPad por USB. Estas pruebas no funcionan con Yam.", 0, 24, 49, 680, 40, 0)
+	child("STATIC", title, 0, 24, 18, 680, 24, 0)
+	child("STATIC", intro, 0, 24, 49, 680, 40, 0)
 	child("STATIC", "Fluidez (FPS)", 0, 24, 95, 150, 20, 0)
 	child("STATIC", "Calidad JPEG", 0, 210, 95, 180, 20, 0)
 	fps = child("COMBOBOX", "", 0x210003, 24, 119, 150, 130, 20)
@@ -467,7 +505,7 @@ func RunLab(o LabOptions) error {
 	}
 	call("SendMessageW", fps, 0x14e, 0, 0)
 	call("SendMessageW", quality, 0x14e, 1, 0)
-	for i, profile := range labProfiles {
+	for i, profile := range profiles {
 		startButtons = append(startButtons, child("BUTTON", profile.Label, 0x10000, 24, 164+i*42, 680, 34, 100+uintptr(i)))
 	}
 	stopButton = child("BUTTON", "&Detener prueba", 0x10000, 24, 424, 200, 36, 1)
@@ -479,11 +517,18 @@ func RunLab(o LabOptions) error {
 	child("BUTTON", exitLabel, 0x10000, 480, 424, 224, 36, 3)
 	child("STATIC", "Estado y resultados", 0, 24, 477, 680, 20, 0)
 	status = child("EDIT", logText, 0x211844, 24, 503, 680, 132, 30) // multiline, read-only, vertical scroll, tab stop
-	child("STATIC", "Wi-Fi y cámara/micrófono como dispositivos del sistema: todavía no disponibles. Cámara: sólo vista previa local.", 0, 24, 646, 680, 36, 0)
+	child("STATIC", footer, 0, 24, 646, 680, 36, 0)
 	child("BUTTON", "Exportar diagnóstico de pruebas", 0x10000, 24, 687, 320, 32, 5)
+	if o.Action != nil {
+		label := o.ActionLabel
+		if label == "" {
+			label = "Ejecutar comprobación"
+		}
+		actionButton = child("BUTTON", label, 0x10000, 368, 687, 336, 32, 6)
+	}
 	icon = nid{H: hwnd, ID: 1, Flags: 7, Callback: tray, Icon: hi}
 	icon.Size = uint32(unsafe.Sizeof(icon))
-	copy(icon.Tip[:], syscall.StringToUTF16("Relevo · Pruebas iPad"))
+	copy(icon.Tip[:], syscall.StringToUTF16("Relevo · Pruebas"))
 	r, _, _ := shell.NewProc("Shell_NotifyIconW").Call(0, uintptr(unsafe.Pointer(&icon)))
 	if r == 0 {
 		destroy()
