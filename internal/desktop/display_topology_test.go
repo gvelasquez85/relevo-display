@@ -39,6 +39,10 @@ func TestCCDActivateDetachReactivatePreservesPhysical(t *testing.T) {
 	if v.Target.ModeIndex != ccdInvalidMode || v.Target.Refresh != (ccdRational{60, 1}) || v.Target.Rotation != 1 || v.Target.Scaling != 1 || v.Flags != 1 {
 		t.Fatalf("invalid attachment: %+v", v)
 	}
+	// Windows rejects UNSPECIFIED scan ordering with an explicit refresh rate.
+	if v.Target.Refresh.Numerator != 0 && v.Target.ScanLine != 1 {
+		t.Fatalf("explicit refresh requires progressive scan ordering, got %d", v.Target.ScanLine)
+	}
 	w, h, x, y := ccdSourceMode(m2[v.Source.ModeIndex])
 	if w != 1024 || h != 768 || x != 1920 || y != 0 {
 		t.Fatal("wrong source mode")

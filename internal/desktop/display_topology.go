@@ -149,7 +149,9 @@ func ccdPlan(paths []ccdPath, modes []ccdMode, key ccdSourceKey, want winvirtual
 	target.Target.ModeIndex = ccdInvalidMode
 	target.Target.Rotation = 1
 	target.Target.Scaling = 1
-	target.Target.ScanLine = 0
+	// UNSPECIFIED is legal only with refresh 0/0. This path requests an
+	// explicit refresh, so supply progressive ordering (Windows SDK contract).
+	target.Target.ScanLine = 1
 	target.Target.Refresh = ccdRational{want.Refresh, 1}
 	target.Flags = 1
 	active = append(active, target)

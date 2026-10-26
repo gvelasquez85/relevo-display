@@ -16,7 +16,7 @@ func openYamTests(base wintray.Settings) {
 	reportIntro := fmt.Sprintf("Usa Yam abierto por USB. Ajustes de la ventana principal: %s · %s · %s. Para cambiar resolución, posición o modo, vuelve a Relevo.", base.Resolution, base.Mode, base.Position)
 	err := wintray.RunLab(wintray.LabOptions{
 		Embedded: true, Profiles: wintray.YamProfiles(), Validate: wintray.ValidateYamSettings,
-		Title: "Relevo Display 0.12.5 · Pruebas con Yam", Intro: reportIntro,
+		Title: "Relevo Display 0.12.6 · Pruebas con Yam", Intro: reportIntro,
 		Footer:      "Sólo app Yam. Los FPS son enviados, no latencia del iPad. Touch/teclado: diagnóstico sin inyección ni texto guardado.",
 		ActionLabel: "Abrir solicitud UAC", ActionProfile: "uac", Action: requestUACProbe,
 		Check: func() (string, error) {

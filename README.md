@@ -7,7 +7,7 @@ Reutiliza iPads antiguos como pantallas de computador. El equipo de referencia e
 | Componente | Estado actual |
 | --- | --- |
 | Windows, pantalla compatible | Funciona con la app Yam Display ya instalada en el iPad. El usuario confirmó imagen y mejor fluidez, con unos 45–50 FPS enviados; no es una medición de latencia ni de cuadros presentados. |
-| Windows, entrega actual | **0.12.5 experimental**, una aplicación con pantalla, «Pruebas y nuevas funciones» y «Exportar diagnóstico». |
+| Windows, entrega actual | **0.12.6 experimental**, una aplicación con pantalla, «Pruebas y nuevas funciones» y «Exportar diagnóstico». |
 | Cliente iOS propio | UIKit/Objective-C, ARMv7, mínimo iOS 9.3.5. Compilado, firmado e instalado, pero el iPad rechaza la verificación de Apple y aún no permite probar su ejecución. |
 | Touch, teclado, cámara y audio propios | Código y pruebas automatizadas disponibles. Las pruebas con el cliente propio en el dispositivo siguen bloqueadas por su verificación. |
 | Cámara y micrófono virtuales de Windows | Componentes en desarrollo. La vista previa de cámara y la escucha local del micrófono **no crean dispositivos seleccionables** por otras aplicaciones. |

@@ -81,6 +81,19 @@ func setVirtualDisplayTopology(ctx context.Context, name string, want winvirtual
 	if err != nil {
 		return err
 	}
+	if log != nil {
+		for i, p := range planned {
+			if i >= 16 {
+				break
+			}
+			log(fmt.Sprintf("display CCD path %d: flags=%#x sourceMode=%d targetMode=%d refresh=%d/%d scan=%d rotation=%d scaling=%d", i, p.Flags, p.Source.ModeIndex, p.Target.ModeIndex, p.Target.Refresh.Numerator, p.Target.Refresh.Denominator, p.Target.ScanLine, p.Target.Rotation, p.Target.Scaling))
+			if p.Source.ModeIndex < uint32(len(plannedModes)) {
+				mode := plannedModes[p.Source.ModeIndex]
+				width, height, x, y := ccdSourceMode(mode)
+				log(fmt.Sprintf("display CCD source %d: type=%d size=%dx%d position=%d,%d pixelFormat=%d", i, mode.Type, width, height, x, y, uint32(mode.Data[1])))
+			}
+		}
+	}
 	for _, flags := range []uintptr{0x20 | 0x40, 0x20 | 0x80} {
 		if flags&0x80 != 0 {
 			latestPaths, latestModes, e := queryCCD(ctx)
