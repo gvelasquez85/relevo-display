@@ -92,7 +92,7 @@ func Open(ctx context.Context, opt Options) (Source, error) {
 		if err != nil {
 			return nil, err
 		}
-		b := windowsDisplayBackend{}
+		b := windowsDisplayBackend{log: opt.Log}
 		mode, err := virtualCaptureMode(ctx, b, width, height)
 		if err != nil {
 			syscall.CloseHandle(handle)

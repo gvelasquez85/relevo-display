@@ -23,24 +23,7 @@ type displayDeviceW struct {
 	Key         [128]uint16
 }
 
-// Public DEVMODEW display union layout; identical on Windows x86/x64/ARM64.
-type devModeW struct {
-	DeviceName                                           [32]uint16
-	SpecVersion, DriverVersion, Size, DriverExtra        uint16
-	Fields                                               uint32
-	X, Y                                                 int32
-	Orientation, FixedOutput                             uint32
-	Color, Duplex, YResolution, TTOption, Collate        int16
-	FormName                                             [32]uint16
-	LogPixels                                            uint16
-	BitsPerPixel, Width, Height, DisplayFlags, Frequency uint32
-	Tail                                                 [8]uint32
-}
-
-var _ [220 - unsafe.Sizeof(devModeW{})]byte
-var _ [unsafe.Sizeof(devModeW{}) - 220]byte
-
-type windowsDisplayBackend struct{}
+type windowsDisplayBackend struct{ log func(string) }
 
 func isMTTVDD(id string) bool {
 	id = strings.ToLower(strings.TrimSpace(id))
@@ -146,17 +129,19 @@ func (b windowsDisplayBackend) Set(ctx context.Context, name string, m winvirtua
 	if err != nil {
 		return err
 	}
-	dm.DriverExtra = 0
-	dm.Fields = 0x20 | 0x80000 | 0x100000 // position, width, height
-	dm.X, dm.Y = m.X, m.Y
 	if m.Attached {
-		if m.Width <= 0 || m.Height <= 0 {
-			return fmt.Errorf("invalid virtual display dimensions")
+		modes, e := advertisedDisplayModes(ctx, name)
+		if e != nil {
+			return e
 		}
-		dm.Width, dm.Height = uint32(m.Width), uint32(m.Height)
-		dm.BitsPerPixel, dm.Frequency, dm.Orientation = m.BitsPerPixel, m.Refresh, m.Orientation
-		dm.Fields |= 0x40000 | 0x400000 | 0x80
+		dm, err = activationDisplayMode(modes, m)
+		if err != nil {
+			return err
+		}
 	} else {
+		dm.DriverExtra = 0
+		dm.Fields = 0x20 | 0x80000 | 0x100000
+		dm.X, dm.Y = m.X, m.Y
 		dm.Width, dm.Height = 0, 0
 	}
 	p, err := syscall.UTF16PtrFromString(name)
@@ -166,8 +151,23 @@ func (b windowsDisplayBackend) Set(ctx context.Context, name string, m winvirtua
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if b.log != nil {
+		b.log(fmt.Sprintf("display change: %s attached=%t -> %t mode=%dx%d@%d bpp=%d position=%d,%d fields=%#x displayFlags=%#x fixedOutput=%d", name, found.Mode.Attached, m.Attached, dm.Width, dm.Height, dm.Frequency, dm.BitsPerPixel, dm.X, dm.Y, dm.Fields, dm.DisplayFlags, dm.FixedOutput))
+	}
+	if m.Attached {
+		test, _, _ := changeDisplaySettingsExW.Call(uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&dm)), 0, 2, 0) // CDS_TEST: no configuration change.
+		if b.log != nil {
+			b.log(fmt.Sprintf("display native mode validation: status %d", int32(test)))
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 	// A named dynamic update modifies only this adapter and leaves registry defaults intact.
 	result, _, _ := changeDisplaySettingsExW.Call(uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&dm)), 0, 0, 0)
+	if b.log != nil {
+		b.log(fmt.Sprintf("display native mode apply: status %d", int32(result)))
+	}
 	if int32(result) != 0 {
 		action := "activar"
 		if !m.Attached {
@@ -215,21 +215,33 @@ func virtualCaptureMode(ctx context.Context, b windowsDisplayBackend, width, hei
 	if count != 1 {
 		return winvirtual.Mode{}, fmt.Errorf("expected exactly one root\\mttvdd display; found %d", count)
 	}
-	p, err := syscall.UTF16PtrFromString(name)
+	modes, err := advertisedDisplayModes(ctx, name)
 	if err != nil {
 		return winvirtual.Mode{}, err
 	}
-	var modes []winvirtual.Mode
+	var advertised []winvirtual.Mode
+	for _, dm := range modes {
+		advertised = append(advertised, modeFromNative(dm, true))
+	}
+	return winvirtual.ExactCaptureMode(advertised, int32(width), int32(height))
+}
+
+func advertisedDisplayModes(ctx context.Context, name string) ([]devModeW, error) {
+	p, err := syscall.UTF16PtrFromString(name)
+	if err != nil {
+		return nil, err
+	}
+	var modes []devModeW
 	for i := uint32(0); i < 10000; i++ {
 		if err := ctx.Err(); err != nil {
-			return winvirtual.Mode{}, err
+			return nil, err
 		}
 		dm := devModeW{Size: 220}
 		ok, _, _ := enumDisplaySettingsExW.Call(uintptr(unsafe.Pointer(p)), uintptr(i), uintptr(unsafe.Pointer(&dm)), 0)
 		if ok == 0 {
-			return winvirtual.ExactCaptureMode(modes, int32(width), int32(height))
+			return modes, nil
 		}
-		modes = append(modes, modeFromNative(dm, true))
+		modes = append(modes, dm)
 	}
-	return winvirtual.Mode{}, fmt.Errorf("virtual display mode enumeration exceeded safety limit")
+	return nil, fmt.Errorf("virtual display mode enumeration exceeded safety limit")
 }
