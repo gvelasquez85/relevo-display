@@ -4,11 +4,13 @@
 package wintray
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -158,25 +160,20 @@ func Run(o Options) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	k := syscall.NewLazyDLL("kernel32.dll")
-	singleton, _, me := k.NewProc("CreateMutexW").Call(0, 0, uintptr(unsafe.Pointer(p(`Local\RelevoDisplay.NotificationShell`))))
-	if singleton == 0 {
-		return fmt.Errorf("crear aplicación: %v", me)
-	}
-	defer syscall.CloseHandle(syscall.Handle(singleton))
-	if me == syscall.Errno(183) {
-		h := call("FindWindowW", uintptr(unsafe.Pointer(p("RelevoNativeLaboratoryWindow"))), 0)
-		if h == 0 {
-			h = call("FindWindowW", uintptr(unsafe.Pointer(p("RelevoDisplayNotificationWindow"))), 0)
-		}
-		if h != 0 {
-			call("ShowWindow", h, 9)
-			call("SetForegroundWindow", h)
-		}
-		return nil
-	}
+
 	if o.Title == "" {
 		o.Title = "Relevo Display 0.9"
 	}
+	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 20*time.Second)
+	singleton, existing, startupErr := acquireShell(startupCtx, o.Title, windowsSingletonAPI{})
+	cancelStartup()
+	if startupErr != nil {
+		return startupErr
+	}
+	if existing {
+		return nil
+	}
+	defer syscall.CloseHandle(syscall.Handle(singleton))
 	settings, loadErr := LoadSettings()
 	var hwnd, status, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, startButton, stopButton, installButton, saveButton, testsButton, yamTestsButton uintptr
 	var active, installing, closing, testsOpen bool
