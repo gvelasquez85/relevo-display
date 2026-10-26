@@ -125,6 +125,16 @@ func (b windowsDisplayBackend) Set(ctx context.Context, name string, m winvirtua
 	if found == nil || !isMTTVDD(found.HardwareID) || found.Primary {
 		return fmt.Errorf("refusing to change unverified or primary display %q", name)
 	}
+
+	// Membership changes use CCD topology rather than a GDI mode change. A
+	// successful Stop leaves the adapter installed but outside the desktop;
+	// its next activation must reconnect that source/target path explicitly.
+	if found.Mode.Attached != m.Attached {
+		if b.log != nil {
+			b.log(fmt.Sprintf("display membership via CCD: %s attached=%t -> %t", name, found.Mode.Attached, m.Attached))
+		}
+		return setVirtualDisplayTopology(ctx, name, m, b.log)
+	}
 	dm, err := readDisplayMode(name, found.Mode.Attached)
 	if err != nil {
 		return err
