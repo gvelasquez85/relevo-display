@@ -391,3 +391,148 @@ func TestDisconnectPreservesExternalDisplayChanges(t *testing.T) {
 		t.Fatal("external display configuration overwritten")
 	}
 }
+
+// cancellationBackend models a non-cancelable native display call: Windows can
+// report a driver failure after the user has already canceled the session.
+type cancellationBackend struct {
+	*fakeBackend
+	cancel                context.CancelFunc
+	apply                 bool
+	driverErr, restoreErr error
+	calls                 int
+	afterList             func(int)
+	lists                 int
+}
+
+func (f *cancellationBackend) List(ctx context.Context) ([]Display, error) {
+	ds, e := f.fakeBackend.List(ctx)
+	f.lists++
+	if f.afterList != nil {
+		f.afterList(f.lists)
+	}
+	return ds, e
+}
+func (f *cancellationBackend) Set(ctx context.Context, name string, m Mode) error {
+	f.calls++
+	if f.calls == 1 {
+		if f.apply {
+			if e := f.fakeBackend.Set(ctx, name, m); e != nil {
+				return e
+			}
+		}
+		f.cancel()
+		return f.driverErr
+	}
+	if f.restoreErr != nil {
+		return f.restoreErr
+	}
+	return f.fakeBackend.Set(ctx, name, m)
+}
+func TestCanceledDriverActivationFailureRollsBack(t *testing.T) {
+	for _, apply := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unchanged", true: "applied"}[apply], func(t *testing.T) {
+			base := fixture()
+			original := base.displays[1].Mode
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			driverErr := errors.New("ChangeDisplaySettingsExW: status -1")
+			f := &cancellationBackend{fakeBackend: base, cancel: cancel, apply: apply, driverErr: driverErr}
+			l, e := Acquire(ctx, f, 1024, 768)
+			if l != nil || !errors.Is(e, context.Canceled) {
+				t.Fatalf("expected cancellation without lease: %v, %v", l, e)
+			}
+			if errors.Is(e, driverErr) {
+				t.Fatalf("driver failure should not replace successful cancellation: %v", e)
+			}
+			if base.displays[1].Mode != original {
+				t.Fatal("baseline not restored")
+			}
+		})
+	}
+}
+func TestCanceledDriverActivationPreservesRollbackFailure(t *testing.T) {
+	base := fixture()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rollbackErr := errors.New("rollback driver failure")
+	f := &cancellationBackend{fakeBackend: base, cancel: cancel, apply: true, driverErr: errors.New("status -1"), restoreErr: rollbackErr}
+	_, e := Acquire(ctx, f, 1024, 768)
+	if !errors.Is(e, context.Canceled) || !errors.Is(e, rollbackErr) {
+		t.Fatalf("lost cancellation or rollback error: %v", e)
+	}
+}
+func TestCanceledUnchangedActivationDoesNotReturnLease(t *testing.T) {
+	base := fixture()
+	base.displays[1].Mode = Mode{X: 1920, Width: 1024, Height: 768, Refresh: 60, BitsPerPixel: 32, Attached: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := &cancellationBackend{fakeBackend: base, cancel: cancel}
+	f.afterList = func(n int) {
+		if n == 2 {
+			cancel()
+		}
+	}
+	l, e := Acquire(ctx, f, 1024, 768)
+	if l != nil || !errors.Is(e, context.Canceled) {
+		t.Fatalf("expected cancellation without lease: %v, %v", l, e)
+	}
+	if f.calls != 0 {
+		t.Fatal("changed already matching display")
+	}
+}
+
+func TestCanceledActivationKeepsRollbackSafetyBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*fakeBackend)
+	}{
+		{"identity", func(f *fakeBackend) { f.displays[1].HardwareID = "replacement" }},
+		{"external settings", func(f *fakeBackend) { f.displays[1].Mode.X = 777 }},
+		{"became primary", func(f *fakeBackend) { f.displays[1].Primary = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := fixture()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f := &cancellationBackend{fakeBackend: base, apply: true, driverErr: errors.New("status -1"), cancel: func() { tc.change(base); cancel() }}
+			_, e := Acquire(ctx, f, 1024, 768)
+			if !errors.Is(e, context.Canceled) {
+				t.Fatalf("lost cancellation: %v", e)
+			}
+			if e.Error() == context.Canceled.Error() {
+				t.Fatal("unsafe rollback error was hidden")
+			}
+			if f.calls != 1 {
+				t.Fatal("rollback overwrote changed display")
+			}
+		})
+	}
+}
+func TestDriverActivationFailureWithoutCancellationRetainsCause(t *testing.T) {
+	base := fixture()
+	driverErr := errors.New("status -1")
+	f := &cancellationBackend{fakeBackend: base, cancel: func() {}, driverErr: driverErr}
+	_, e := Acquire(context.Background(), f, 1024, 768)
+	if !errors.Is(e, driverErr) || errors.Is(e, context.Canceled) {
+		t.Fatalf("lost original driver failure: %v", e)
+	}
+}
+func TestCancellationDuringSuccessfulVerificationRollsBack(t *testing.T) {
+	base := fixture()
+	original := base.displays[1].Mode
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := &cancellationBackend{fakeBackend: base, apply: true, cancel: func() {}}
+	f.afterList = func(n int) {
+		if n == 3 {
+			cancel()
+		}
+	}
+	l, e := Acquire(ctx, f, 1024, 768)
+	if l != nil || !errors.Is(e, context.Canceled) {
+		t.Fatalf("expected canceled verified activation: %v, %v", l, e)
+	}
+	if base.displays[1].Mode != original || f.calls != 2 {
+		t.Fatal("verified activation not rolled back")
+	}
+}

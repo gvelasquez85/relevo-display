@@ -169,7 +169,11 @@ func (b windowsDisplayBackend) Set(ctx context.Context, name string, m winvirtua
 	// A named dynamic update modifies only this adapter and leaves registry defaults intact.
 	result, _, _ := changeDisplaySettingsExW.Call(uintptr(unsafe.Pointer(p)), uintptr(unsafe.Pointer(&dm)), 0, 0, 0)
 	if int32(result) != 0 {
-		return fmt.Errorf("ChangeDisplaySettingsExW(%s): status %d", name, int32(result))
+		action := "activar"
+		if !m.Attached {
+			action = "retirar"
+		}
+		return fmt.Errorf("no se pudo %s la pantalla virtual %s (%dx%d, posición %d,%d): ChangeDisplaySettingsExW status %d", action, name, dm.Width, dm.Height, m.X, m.Y, int32(result))
 	}
 	return nil
 }

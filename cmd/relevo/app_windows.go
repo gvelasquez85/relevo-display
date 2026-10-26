@@ -21,7 +21,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.12", Start: runTraySession, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.12.1", Start: runTraySession, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -125,16 +125,24 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 		return fmt.Errorf("Abre la app compatible en el iPad y vuelve a iniciar la extensión. %w", e)
 	}
 	defer conn.Close()
+	log("capture activation requested")
+	report("Preparando pantalla y captura…")
 	source, e := desktop.Open(ctx, desktop.Options{Mode: settings.Mode, Display: 1, Position: settings.Position, FPS: settings.FPS, JPEGQuality: settings.Quality, Width: w, Height: h, Log: log})
 	if e != nil {
-		return e
+		err = normalizeSessionError(ctx, e)
+		cleaned = err == nil
+		log(fmt.Sprintf("capture activation ended: %v", e))
+		return err
 	}
+	log("capture activation completed")
 	defer func() {
+		log("capture cleanup requested")
 		if info, ok := source.(interface{ CaptureStatus() desktop.CaptureStatus }); ok {
 			captureStatus = info.CaptureStatus()
 		}
 		cleanupErr := source.Close()
 		cleaned = cleanupErr == nil
+		log(fmt.Sprintf("capture cleanup completed: %v", cleanupErr))
 		err = errors.Join(err, cleanupErr)
 	}()
 	if opt.Duration > 0 {
@@ -174,7 +182,7 @@ func exportLastDiagnostic() error {
 	}
 	b, e := os.ReadFile(filepath.Join(dir, "last-session.json"))
 	if os.IsNotExist(e) {
-		return wintray.SaveDiagnostic("Relevo Display 0.12: todavía no se ha completado una sesión de pantalla.")
+		return wintray.SaveDiagnostic("Relevo Display 0.12.1: todavía no se ha completado una sesión de pantalla.")
 	}
 	if e != nil {
 		return e

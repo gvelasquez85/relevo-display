@@ -155,17 +155,32 @@ func AcquirePosition(ctx context.Context, b Backend, width, height int32, positi
 	if current.Primary || current.Mode != target.Mode {
 		return nil, errors.New("virtual display changed before activation")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if desired == target.Mode {
 		return lease, nil
 	}
 	if err = b.Set(ctx, target.Name, desired); err != nil {
+		// A native display call may finish with a generic driver error after
+		// Stop canceled the session. Roll back first, but report cancellation
+		// only when cleanup succeeds; keep any restoration failure visible.
+		if canceled := ctx.Err(); canceled != nil {
+			return nil, errors.Join(canceled, lease.restore())
+		}
 		return nil, errors.Join(fmt.Errorf("activate virtual display: %w", err), lease.restore())
 	}
 	verifyCtx, cancel := context.WithTimeout(ctx, activationTimeout)
 	defer cancel()
 	err = waitMode(verifyCtx, b, target.Name, desired)
 	if err != nil {
+		if canceled := ctx.Err(); canceled != nil {
+			return nil, errors.Join(canceled, lease.restore())
+		}
 		return nil, errors.Join(fmt.Errorf("verify virtual display activation: %w", err), lease.restore())
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(err, lease.restore())
 	}
 	return lease, nil
 }
