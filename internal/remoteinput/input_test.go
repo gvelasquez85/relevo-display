@@ -8,7 +8,7 @@ func TestShortcutKeyCodes(t *testing.T) {
 			t.Fatal(code, err)
 		}
 	}
-	for _, code := range []string{"Keya", "KeyAA", "Digit10", "F0", "F13", "F01"} {
+	for _, code := range []string{"Keya", "KeyAA", "Digit10", "F0", "F25", "F01"} {
 		if (Key{Kind: "press", Code: code}).Validate() == nil {
 			t.Fatal("invalid code", code)
 		}

@@ -22,6 +22,8 @@ type LabOptions struct {
 	Action                     func() error
 	// Embedded returns to the main Relevo window on close.
 	Embedded bool
+	// InputField adds a transient editable field; its content is never read or exported.
+	InputField bool
 	// Preview carries bounded latest JPEG frames; the producer retains ownership until send.
 	Preview <-chan []byte
 	Start   func(LabSettings, <-chan struct{}, func(string)) error
@@ -51,7 +53,7 @@ func YamProfiles() []LabProfile {
 		{"display", "Pantalla: resolución, modo y posición"},
 		{"disconnect", "Desconexión y recuperación"},
 		{"uac", "Recuperación después de UAC"},
-		{"input", "Investigar touch, gestos y teclado"},
+		{"input", "Probar touch, gestos y teclado"},
 	}
 }
 

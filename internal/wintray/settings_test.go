@@ -87,7 +87,7 @@ func TestLegacyNeverOverridesCurrentSettings(t *testing.T) {
 			}
 			got, err := loadSettingsWithLegacy(current, legacy)
 			if contents == `{"resolution":"1024x768","fps":15,"quality":60}` {
-				if err != nil || got != (Settings{Resolution: "1024x768", FPS: 15, Quality: 60, Mode: "extend", Position: "right"}) {
+				if err != nil || got != (Settings{Touch: true, Keyboard: true, Resolution: "1024x768", FPS: 15, Quality: 60, Mode: "extend", Position: "right"}) {
 					t.Fatal(got, err)
 				}
 			} else if err == nil {
@@ -174,5 +174,49 @@ func TestHighRateAndQualitySettingsPersist(t *testing.T) {
 		if s.Validate() == nil {
 			t.Fatalf("invalid UI FPS %d accepted", fps)
 		}
+	}
+}
+
+func TestOldSettingsEnableTouchAndKeyboardByDefault(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(p, []byte(`{"resolution":"1024x768","fps":60,"quality":80}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadSettings(p)
+	if err != nil || !got.Touch || !got.Keyboard {
+		t.Fatalf("old settings lost new defaults: %+v %v", got, err)
+	}
+}
+func TestTouchKeyboardExplicitPreferencesRoundTrip(t *testing.T) {
+	for _, touch := range []bool{false, true} {
+		for _, keyboard := range []bool{false, true} {
+			want := DefaultSettings()
+			want.Touch = touch
+			want.Keyboard = keyboard
+			p := filepath.Join(t.TempDir(), "settings.json")
+			if err := saveSettings(p, want); err != nil {
+				t.Fatal(err)
+			}
+			got, err := loadSettings(p)
+			if err != nil || got != want {
+				t.Fatalf("input preferences changed: %+v want %+v err %v", got, want, err)
+			}
+		}
+	}
+}
+func TestLegacyMissingInputSettingsMigrateWithDefaults(t *testing.T) {
+	root := t.TempDir()
+	old := filepath.Join(root, "old.json")
+	current := filepath.Join(root, "new", "settings.json")
+	if err := os.WriteFile(old, []byte(`{"resolution":"1024x768","fps":30,"quality":80}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadSettingsWithLegacy(current, old)
+	if err != nil || !got.Touch || !got.Keyboard {
+		t.Fatalf("legacy input defaults: %+v %v", got, err)
+	}
+	got, err = loadSettings(current)
+	if err != nil || !got.Touch || !got.Keyboard {
+		t.Fatalf("persisted migration: %+v %v", got, err)
 	}
 }

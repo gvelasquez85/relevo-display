@@ -15,14 +15,16 @@ import (
 	"relevo/internal/session"
 	"relevo/internal/usbmux"
 	"relevo/internal/windriver"
+	"relevo/internal/wininput"
 	"relevo/internal/wintray"
+	"relevo/internal/yaminput"
 	"strconv"
 	"strings"
 	"time"
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.13.0", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.14.0", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -32,7 +34,7 @@ func launchDesktopApp() bool {
 type compatibleRunOptions struct {
 	Duration time.Duration
 	Observe  func(session.Stats, desktop.CaptureStatus) string
-	Complete func(session.Stats, desktop.CaptureStatus, bool, error)
+	Complete func(session.Stats, desktop.CaptureStatus, bool, error, yaminput.Stats, bool)
 }
 
 func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func(string)) error {
@@ -51,8 +53,10 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 	var stats session.Stats
 	var captureStatus desktop.CaptureStatus
 	var cleaned bool
+	var inputStats yaminput.Stats
+	var inputAvailable bool
 	if opt.Complete != nil {
-		defer func() { opt.Complete(stats, captureStatus, cleaned, err) }()
+		defer func() { opt.Complete(stats, captureStatus, cleaned, err, inputStats, inputAvailable) }()
 	}
 	var selectedEncoder string
 	var events []string
@@ -83,9 +87,11 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 			CaptureStatus                desktop.CaptureStatus
 			Settings                     wintray.Settings
 			Encoder                      string
+			RemoteInput                  yaminput.Stats
+			RemoteInputAvailable         bool
 			MonitorDeviceState           *windriver.DeviceState
 			MonitorDeviceStateError      string
-		}{Version: version, Resolution: resolution, Started: started.Format(time.RFC3339), Stats: stats, Events: events, RequestedFPS: settings.FPS, JPEGQuality: settings.Quality, Settings: settings, Encoder: selectedEncoder, CaptureCleanupConfirmed: cleaned, CaptureStatus: captureStatus}
+		}{Version: version, Resolution: resolution, Started: started.Format(time.RFC3339), Stats: stats, Events: events, RequestedFPS: settings.FPS, JPEGQuality: settings.Quality, Settings: settings, Encoder: selectedEncoder, CaptureCleanupConfirmed: cleaned, CaptureStatus: captureStatus, RemoteInput: inputStats, RemoteInputAvailable: inputAvailable}
 		if err != nil {
 			result.Error = err.Error()
 		}
@@ -171,6 +177,45 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 		log(fmt.Sprintf("capture cleanup completed: %v", cleanupErr))
 		err = errors.Join(err, cleanupErr)
 	}()
+	// Input owns only contact/key state. Register after source cleanup so it
+	// releases held input before the display peripheral is removed (LIFO).
+	var input *yaminput.Controller
+	if settings.Touch || settings.Keyboard {
+		target, inputErr := desktop.InputTarget(source)
+		if inputErr == nil {
+			mouse, mouseErr := wininput.NativeBackend()
+			extended, extendedErr := wininput.NativeExtendedBackend()
+			inputErr = errors.Join(mouseErr, extendedErr)
+			if inputErr == nil {
+				input, inputErr = yaminput.New(target, mouse, extended, yaminput.Options{Touch: settings.Touch, Keyboard: settings.Keyboard})
+			}
+		}
+		if inputErr != nil {
+			log(fmt.Sprintf("remote input initialization unavailable: %v; video continues (no event values)", inputErr))
+		} else {
+			inputAvailable = true
+			log(fmt.Sprintf("remote input enabled: touch=%t keyboard=%t; single-contact touch and interpreted gestures", settings.Touch, settings.Keyboard))
+			defer func() {
+				if input.Close() != nil {
+					log("remote input release failed; display cleanup will continue")
+				}
+				inputStats = input.Stats()
+			}()
+		}
+	}
+	var cancelInput func()
+	var receiveInput func(map[string]interface{}) error
+	if input != nil {
+		cancelInput = func() { _ = input.CancelActive() }
+		receiveInput = func(event map[string]interface{}) error {
+			before := input.Stats().Errors
+			_ = input.Handle(event)
+			if input.Stats().Errors > before && before == 0 {
+				log("remote input paused after injection failure; video continues; retry on next input")
+			}
+			return nil // UAC/input failure must never terminate the video session.
+		}
+	}
 	if opt.Duration > 0 {
 		timedCtx, stopTimer := context.WithTimeout(ctx, opt.Duration)
 		defer stopTimer()
@@ -183,7 +228,7 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 		}
 		defer release()
 	}
-	stats, err = session.Run(ctx, conn, session.Options{Continuous: true, FPS: settings.FPS, Width: w, Height: h, Log: log, Progress: func(st session.Stats) {
+	stats, err = session.Run(ctx, conn, session.Options{InputEvent: receiveInput, InputCancel: cancelInput, Continuous: true, FPS: settings.FPS, Width: w, Height: h, Log: log, Progress: func(st session.Stats) {
 		encoder := "JPEG"
 		if info, ok := source.(interface{ EncoderName() string }); ok && info.EncoderName() != "" {
 			encoder = info.EncoderName()
@@ -193,8 +238,14 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 			captureStatus = info.CaptureStatus()
 		}
 		extra := ""
+		if input != nil {
+			inputStats = input.Stats()
+			extra = fmt.Sprintf("\nEntrada: %d procesados · %d omitidos · %d errores", inputStats.Handled, inputStats.Ignored, inputStats.Errors)
+		} else if settings.Touch || settings.Keyboard {
+			extra = "\nEntrada no disponible; vídeo activo."
+		}
 		if opt.Observe != nil {
-			extra = opt.Observe(st, captureStatus)
+			extra += opt.Observe(st, captureStatus)
 		}
 		report(fmt.Sprintf("%.1f / %d FPS · %s · %s · Q%d\nCaptura p95: %.1f ms · escritura p95: %.1f ms", st.ActualFPS, settings.FPS, resolution, encoder, settings.Quality, st.CaptureP95Millis, st.WriteP95Millis) + extra)
 	}, Frame: func(ctx context.Context, _ int) ([]byte, error) { return source.Next(ctx) }})

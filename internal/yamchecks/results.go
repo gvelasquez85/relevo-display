@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"relevo/internal/desktop"
 	"relevo/internal/session"
+	"relevo/internal/yaminput"
 	"sort"
 	"strings"
 )
 
 type Result struct {
+	Input                               yaminput.Stats
+	InputAvailable                      bool
 	UserStopped                         bool
 	Profile, Resolution, Mode, Position string
 	Quality, RequestedFPS               int
@@ -52,7 +55,10 @@ func (r Result) Summary() string {
 		if r.Failure != "" {
 			prefix = "Sesión interrumpida; diagnóstico parcial. "
 		}
-		return prefix + "Eventos recibidos: " + EventSummary(r.Stats.InputEventCounts) + ". Sólo diagnóstico; no se inyectan acciones ni se guarda texto."
+		if !r.InputAvailable {
+			return prefix + "Eventos recibidos: " + EventSummary(r.Stats.InputEventCounts) + ". Entrada desactivada o no disponible; no se inyectan acciones ni se guarda texto."
+		}
+		return prefix + fmt.Sprintf("Entrada: %d eventos procesados, %d omitidos, %d errores. ", r.Input.Handled, r.Input.Ignored, r.Input.Errors) + "Comprueba la respuesta en Windows. Touch de un contacto y gestos interpretados; no confirma multitouch completo. No se guarda texto."
 	default:
 		if r.Failure != "" {
 			return "Prueba interrumpida: " + r.Failure

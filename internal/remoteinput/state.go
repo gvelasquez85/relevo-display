@@ -108,12 +108,12 @@ func (k Key) Validate() error {
 	}
 	if len(k.Code) >= 2 && k.Code[0] == 'F' {
 		n, e := strconv.Atoi(k.Code[1:])
-		if e == nil && n >= 1 && n <= 12 && k.Code == "F"+strconv.Itoa(n) {
+		if e == nil && n >= 1 && n <= 24 && k.Code == "F"+strconv.Itoa(n) {
 			return nil
 		}
 	}
 	switch k.Code {
-	case "Space", "Control", "Alt", "Shift", "Meta", "Enter", "Tab", "Escape", "Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown":
+	case "CapsLock", "NumLock", "ScrollLock", "PrintScreen", "Pause", "Insert", "ContextMenu", "Minus", "Equal", "BracketLeft", "BracketRight", "Backslash", "IntlBackslash", "Semicolon", "Quote", "Backquote", "Comma", "Period", "Slash", "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9", "NumpadDivide", "NumpadMultiply", "NumpadSubtract", "NumpadAdd", "NumpadEnter", "NumpadDecimal", "Space", "Control", "Alt", "Shift", "Meta", "Enter", "Tab", "Escape", "Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown":
 		return nil
 	}
 	return fmt.Errorf("unsupported key code")

@@ -32,16 +32,17 @@ type ExtendedBackend interface {
 	Keyboard([]KeyPacket) error
 }
 type ExtendedController struct {
-	mu      sync.Mutex
-	target  func() (Target, error)
-	backend ExtendedBackend
-	wire    remoteinput.State
-	active  map[uint32]TouchPacket
-	held    map[string]KeyPacket
-	pinned  Target
-	closed  bool
-	failure error
-	done    chan struct{}
+	mu             sync.Mutex
+	target         func() (Target, error)
+	backend        ExtendedBackend
+	wire           remoteinput.State
+	active         map[uint32]TouchPacket
+	held           map[string]KeyPacket
+	pinned         Target
+	closed         bool
+	failure        error
+	releasePending bool
+	done           chan struct{}
 }
 
 func NewExtended(target func() (Target, error), backend ExtendedBackend) *ExtendedController {
@@ -61,12 +62,16 @@ func (c *ExtendedController) maintain() {
 			return
 		case <-tick.C:
 			c.mu.Lock()
-			if !c.closed && c.failure == nil && len(c.active) > 0 {
+			if !c.closed && c.failure != nil && c.releasePending {
+				// A secure desktop can temporarily reject releases. Retry only releases,
+				// never the original action, until the pending state is cleared.
+				_ = c.release()
+			} else if !c.closed && c.failure == nil && (len(c.active) > 0 || len(c.held) > 0) {
 				t, e := c.target()
 				if e == nil && t != c.pinned {
 					e = fmt.Errorf("touch target changed")
 				}
-				if e == nil {
+				if e == nil && len(c.active) > 0 {
 					e = c.backend.Touch(c.frame(nil))
 				}
 				if e != nil {
@@ -123,6 +128,7 @@ func (c *ExtendedController) release() error {
 	if pending, ok := c.backend.(interface{ Release() error }); ok {
 		result = errors.Join(result, pending.Release())
 	}
+	c.releasePending = result != nil
 	return result
 }
 func (c *ExtendedController) fail(e error) error {
@@ -169,7 +175,7 @@ func (c *ExtendedController) HandleContacts(batch []remoteinput.Contact) error {
 	if e != nil {
 		return c.fail(e)
 	}
-	if len(c.active) > 0 && t != c.pinned {
+	if (len(c.active) > 0 || len(c.held) > 0) && t != c.pinned {
 		return c.fail(fmt.Errorf("touch target changed"))
 	}
 	c.pinned = t
@@ -270,6 +276,10 @@ func (c *ExtendedController) HandleContacts(batch []remoteinput.Contact) error {
 }
 
 var virtualKeys = map[string]KeyPacket{
+	"CapsLock": {VK: 0x14}, "NumLock": {VK: 0x90, Extended: true}, "ScrollLock": {VK: 0x91}, "PrintScreen": {VK: 0x2c, Extended: true}, "Pause": {VK: 0x13}, "Insert": {VK: 0x2d, Extended: true}, "ContextMenu": {VK: 0x5d, Extended: true},
+	"Minus": {VK: 0xbd}, "Equal": {VK: 0xbb}, "BracketLeft": {VK: 0xdb}, "BracketRight": {VK: 0xdd}, "Backslash": {VK: 0xdc}, "IntlBackslash": {VK: 0xe2}, "Semicolon": {VK: 0xba}, "Quote": {VK: 0xde}, "Backquote": {VK: 0xc0}, "Comma": {VK: 0xbc}, "Period": {VK: 0xbe}, "Slash": {VK: 0xbf},
+	"Numpad0": {VK: 0x60}, "Numpad1": {VK: 0x61}, "Numpad2": {VK: 0x62}, "Numpad3": {VK: 0x63}, "Numpad4": {VK: 0x64}, "Numpad5": {VK: 0x65}, "Numpad6": {VK: 0x66}, "Numpad7": {VK: 0x67}, "Numpad8": {VK: 0x68}, "Numpad9": {VK: 0x69}, "NumpadMultiply": {VK: 0x6a}, "NumpadAdd": {VK: 0x6b}, "NumpadSubtract": {VK: 0x6d}, "NumpadDecimal": {VK: 0x6e}, "NumpadDivide": {VK: 0x6f, Extended: true}, "NumpadEnter": {VK: 0x0d, Extended: true},
+
 	"Control": {VK: 0x11}, "Alt": {VK: 0x12}, "Shift": {VK: 0x10}, "Meta": {VK: 0x5b, Extended: true},
 	"Enter": {VK: 0x0d}, "Tab": {VK: 9}, "Escape": {VK: 0x1b}, "Backspace": {VK: 8},
 	"Delete": {VK: 0x2e, Extended: true}, "ArrowLeft": {VK: 0x25, Extended: true}, "ArrowRight": {VK: 0x27, Extended: true}, "ArrowUp": {VK: 0x26, Extended: true}, "ArrowDown": {VK: 0x28, Extended: true},
@@ -293,9 +303,10 @@ func (c *ExtendedController) HandleKey(k remoteinput.Key) error {
 	if _, _, e = pixelCoordinates(t, .5, .5); e != nil {
 		return c.fail(e)
 	}
-	if len(c.active) > 0 && t != c.pinned {
+	if (len(c.active) > 0 || len(c.held) > 0) && t != c.pinned {
 		return c.fail(fmt.Errorf("touch target changed"))
 	}
+	c.pinned = t
 	var packets []KeyPacket
 	if k.Kind == "text" {
 		units := utf16.Encode([]rune(k.Text))
@@ -365,7 +376,7 @@ func lookupVirtualKey(code string) (KeyPacket, bool) {
 	}
 	if len(code) >= 2 && code[0] == 'F' {
 		n, e := strconv.Atoi(code[1:])
-		if e == nil && n >= 1 && n <= 12 && code == "F"+strconv.Itoa(n) {
+		if e == nil && n >= 1 && n <= 24 && code == "F"+strconv.Itoa(n) {
 			return KeyPacket{VK: uint16(0x6f + n)}, true
 		}
 	}

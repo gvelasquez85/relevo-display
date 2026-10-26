@@ -10,6 +10,8 @@ import (
 )
 
 type Settings struct {
+	Touch      bool   `json:"touch"`
+	Keyboard   bool   `json:"keyboard"`
 	Mode       string `json:"mode"`
 	Position   string `json:"position"`
 	KeepAwake  bool   `json:"keep_awake"`
@@ -24,7 +26,7 @@ var JPEGQualities = []int{60, 70, 80, 90, 95, 100}
 var Resolutions = []string{"1024x768", "1280x960", "1600x1200", "2048x1536"}
 
 func DefaultSettings() Settings {
-	return Settings{Resolution: "1024x768", FPS: 20, Quality: 70, Mode: "extend", Position: "right"}
+	return Settings{Touch: true, Keyboard: true, Resolution: "1024x768", FPS: 20, Quality: 70, Mode: "extend", Position: "right"}
 }
 func (s Settings) Validate() error {
 	if s.Mode != "extend" && s.Mode != "desktop" {

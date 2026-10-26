@@ -82,6 +82,7 @@ func RunLab(o LabOptions) error {
 	}
 	defer call("DestroyIcon", hi)
 	var hwnd, status, fps, quality, stopButton, checkButton, actionButton uintptr
+	var testField uintptr
 	var currentProfile string
 	var startButtons []uintptr
 	var busy, closing, checking, destroyed bool
@@ -162,6 +163,14 @@ func RunLab(o LabOptions) error {
 		call("SendMessageW", status, 0xb7, 0, 0)
 	}
 	update := func() {
+		if testField != 0 {
+			enabled := uintptr(0)
+			if busy && !checking && !closing && currentProfile == "input" && stop != nil {
+				enabled = 1
+			}
+			call("EnableWindow", testField, enabled)
+		}
+
 		enabled := uintptr(1)
 		if busy || closing {
 			enabled = 0
@@ -204,6 +213,9 @@ func RunLab(o LabOptions) error {
 	cancel := func() {
 		if stop != nil {
 			clearPreview()
+			if testField != 0 {
+				setText(testField, "")
+			}
 			close(stop)
 			stop = nil
 			appendLog("Deteniendo… Espera a que se liberen pantalla, entrada y audio.")
@@ -352,6 +364,9 @@ func RunLab(o LabOptions) error {
 			}
 			return 0
 		case finished:
+			if testField != 0 {
+				setText(testField, "")
+			}
 			clearPreview()
 			mu.Lock()
 			err := workerResult
@@ -516,7 +531,16 @@ func RunLab(o LabOptions) error {
 	}
 	child("BUTTON", exitLabel, 0x10000, 480, 424, 224, 36, 3)
 	child("STATIC", "Estado y resultados", 0, 24, 477, 680, 20, 0)
-	status = child("EDIT", logText, 0x211844, 24, 503, 680, 132, 30) // multiline, read-only, vertical scroll, tab stop
+	statusHeight := 132
+	if o.InputField {
+		statusHeight = 72
+	}
+	status = child("EDIT", logText, 0x211844, 24, 503, 680, statusHeight, 30) // multiline, read-only, vertical scroll, tab stop
+	if o.InputField {
+		child("STATIC", "Campo de prueba: toca y escribe; el contenido se borra al detener.", 0, 24, 579, 680, 20, 0)
+		testField = child("EDIT", "", 0x211044, 24, 602, 680, 40, 50)
+		call("SendMessageW", testField, 0xc5, 4096, 0) // EM_LIMITTEXT; never read/export typed content.
+	}
 	child("STATIC", footer, 0, 24, 646, 680, 36, 0)
 	child("BUTTON", "Exportar diagnóstico de pruebas", 0x10000, 24, 687, 320, 32, 5)
 	if o.Action != nil {

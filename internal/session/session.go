@@ -18,6 +18,12 @@ import (
 )
 
 type Options struct {
+	// InputEvent consumes a validated remote input event synchronously after
+	// the compatible handshake. Nil retains diagnostics without injecting input.
+	InputEvent func(map[string]interface{}) error
+	// InputCancel releases held input when a recognized event is malformed.
+	// It receives no event values and must not interrupt the video stream.
+	InputCancel      func()
 	Duration         time.Duration
 	Continuous       bool
 	Width, Height    int
@@ -29,6 +35,16 @@ type Options struct {
 	// Frame supplies a JPEG at the negotiated size. Nil uses the test pattern.
 	Frame func(context.Context, int) ([]byte, error)
 }
+
+// Keep handler errors inspectable with errors.Is/As without accidentally
+// echoing typed text, coordinates, or other event values through diagnostics.
+type inputDispatchError struct{ cause error }
+
+func (e *inputDispatchError) Error() string {
+	return "remote input handler failed (event values omitted)"
+}
+func (e *inputDispatchError) Unwrap() error { return e.cause }
+
 type Stats struct {
 	EndReason              string                       `json:"end_reason,omitempty"`
 	InputEventSchemas      map[string]map[string]string `json:"input_event_schemas,omitempty"`
@@ -376,22 +392,47 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 					}
 					return st, errors.New("iPad app stopped or entered background; keep the compatible iPad app visible")
 				case "SingleTap", "TwoFingerSingleTap", "SingleTap2nd", "Scrolled", "Dragged", "HoverEvent", "KeyboardEvent", "KeyboardPressEvent", "vKeyboardEvent", "vKeyboardSourceEvent", "Zoomed", "TwoFingerPanned", "TwoFingerRotated", "SwipeToChangeSpaceEvent":
+
+					schema, valid := InputEventSchema(event)
+					for _, key := range []string{"mouseButton", "modifierFlags"} {
+						if value, present := event[key]; present && !finiteInputNumber(value) {
+							valid = false
+						}
+					}
+					if !valid {
+						if opt.InputCancel != nil && st.Ready {
+							opt.InputCancel()
+						}
+						log("RX invalid input event (values omitted; ignored)")
+						break
+					}
 					if st.InputEventCounts == nil {
 						st.InputEventCounts = make(map[string]int)
 					}
 					st.InputEventCounts[name]++
-					if schema, valid := InputEventSchema(event); valid {
-						if st.InputEventSchemas == nil {
-							st.InputEventSchemas = make(map[string]map[string]string)
-						}
-						if _, exists := st.InputEventSchemas[name]; !exists {
-							st.InputEventSchemas[name] = schema
-						}
+					if st.InputEventSchemas == nil {
+						st.InputEventSchemas = make(map[string]map[string]string)
+					}
+					if _, exists := st.InputEventSchemas[name]; !exists {
+						st.InputEventSchemas[name] = schema
 					}
 					if st.InputEventCounts[name] == 1 {
-						log("RX input event: " + name + " (values omitted; not injected)")
+						disposition := "not injected"
+						if opt.InputEvent != nil && st.Ready {
+							disposition = "remote input enabled"
+						}
+						log("RX input event: " + name + " (values omitted; " + disposition + ")")
 					}
+					if opt.InputEvent != nil && st.Ready {
+						if e := opt.InputEvent(event); e != nil {
+							return st, &inputDispatchError{cause: e}
+						}
+					}
+
 				case "DeviceResize":
+					if opt.InputCancel != nil && st.Ready {
+						opt.InputCancel()
+					}
 					log("RX DeviceResize")
 				default:
 					log("RX input/lifecycle event (values omitted; not injected into computer)")

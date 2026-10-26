@@ -18,7 +18,7 @@ func InputEventSchema(event map[string]interface{}) (map[string]string, bool) {
 		return nil, false
 	}
 	schema := make(map[string]string, 11)
-	for _, key := range [...]string{"eventName", "x", "y", "width", "height", "mouseButton", "modifierFlags", "deltaX", "deltaY", "phase"} {
+	for _, key := range [...]string{"eventName", "x", "y", "width", "height", "mouseButton", "modifierFlags", "deltaX", "deltaY", "phase", "startOfDrag", "endOfDrag", "startOfScroll", "endOfScroll", "startOfPan", "endOfPan", "startOfZoom", "endOfZoom", "scale", "zoom", "keyCode", "pressed", "inputString", "modifiers", "keyboardLayout", "language"} {
 		value, present := event[key]
 		if !present {
 			continue

@@ -50,3 +50,15 @@ func TestInputSchemaKnownNamesAndBounds(t *testing.T) {
 		t.Fatalf("types %v %v", got, ok)
 	}
 }
+
+func TestGestureAndKeyboardSchemaNeverStoresValues(t *testing.T) {
+	event := map[string]interface{}{"eventName": "KeyboardEvent", "inputString": "private password", "modifiers": "private modifiers", "keyCode": uint64(4), "pressed": true, "startOfDrag": true, "endOfDrag": false, "scale": 1.12, "zoom": 1}
+	schema, ok := InputEventSchema(event)
+	if !ok || schema["inputString"] != "string" || schema["pressed"] != "boolean" || schema["scale"] != "number" {
+		t.Fatalf("schema %v", schema)
+	}
+	b, _ := json.Marshal(schema)
+	if strings.Contains(string(b), "private") || strings.Contains(string(b), "1.12") {
+		t.Fatal("values leaked")
+	}
+}

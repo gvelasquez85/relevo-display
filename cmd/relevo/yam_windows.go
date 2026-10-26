@@ -9,15 +9,16 @@ import (
 	"relevo/internal/usbmux"
 	"relevo/internal/wintray"
 	"relevo/internal/yamchecks"
+	"relevo/internal/yaminput"
 )
 
 func openYamTests(base wintray.Settings) {
 	var previous30, previous60 *yamchecks.Result
 	reportIntro := fmt.Sprintf("Usa Yam abierto por USB. Ajustes de la ventana principal: %s · %s · %s. Para cambiar resolución, posición o modo, vuelve a Relevo.", base.Resolution, base.Mode, base.Position)
 	err := wintray.RunLab(wintray.LabOptions{
-		Embedded: true, Profiles: wintray.YamProfiles(), Validate: wintray.ValidateYamSettings,
-		Title: "Relevo Display 0.13.0 · Pruebas con Yam", Intro: reportIntro,
-		Footer:      "Sólo app Yam. Los FPS son enviados, no latencia del iPad. Touch/teclado: diagnóstico sin inyección ni texto guardado.",
+		Embedded: true, InputField: true, Profiles: wintray.YamProfiles(), Validate: wintray.ValidateYamSettings,
+		Title: "Relevo Display 0.14.0 · Pruebas con Yam", Intro: reportIntro,
+		Footer:      "Yam: touch de un contacto, gestos interpretados y teclado. Sin multitouch completo ni apertura automática del teclado. No se guarda texto.",
 		ActionLabel: "Abrir solicitud UAC", ActionProfile: "uac", Action: requestUACProbe,
 		Check: func() (string, error) {
 			c := &usbmux.Client{}
@@ -47,7 +48,7 @@ func openYamTests(base wintray.Settings) {
 			case "uac":
 				report("Con vídeo activo, pulsa Abrir solicitud UAC. Aceptar o cancelar sólo cierra un proceso de prueba; no instala ni modifica nada. Comprueba si la imagen regresa. Si Windows no usa escritorio seguro, no se dará por observada esa transición.")
 			case "input":
-				report("Toca, arrastra, desplaza con dos dedos y prueba gestos/teclado si Yam los ofrece. Se cuentan eventos y tipos de campos, nunca texto ni coordenadas. No se controla Windows desde esta prueba.")
+				report("Toca, arrastra, desplaza con dos dedos y prueba gestos/teclado si Yam los ofrece. Se cuentan eventos y tipos de campos, nunca texto ni coordenadas. Las opciones Touch/gestos y Teclado iPad de la ventana principal controlan la entrada en Windows. Arrastra esta ventana al monitor del iPad y toca el campo de prueba para escribir; UAC y aplicaciones elevadas pueden rechazar entrada.")
 			case "display":
 				report("Comprueba proporción 4:3 y posición del monitor. El modo desktop muestra la pantalla principal en el iPad; no cambia Windows a clonación nativa.")
 			default:
@@ -59,7 +60,9 @@ func openYamTests(base wintray.Settings) {
 				Observe: func(st session.Stats, c desktop.CaptureStatus) string {
 					return "\n" + fmt.Sprintf("Eventos: %s\nPausas de escritorio: %d · recuperaciones: %d · pausa actual: %t", yamchecks.EventSummary(st.InputEventCounts), c.Pauses, c.Recoveries, c.Paused)
 				},
-				Complete: func(st session.Stats, c desktop.CaptureStatus, cleaned bool, runErr error) {
+				Complete: func(st session.Stats, c desktop.CaptureStatus, cleaned bool, runErr error, input yaminput.Stats, available bool) {
+					result.Input = input
+					result.InputAvailable = available
 					result.Stats = st
 					result.Capture = c
 					result.Cleaned = cleaned

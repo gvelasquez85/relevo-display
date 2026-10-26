@@ -3,6 +3,7 @@ package yamchecks
 import (
 	"relevo/internal/desktop"
 	"relevo/internal/session"
+	"relevo/internal/yaminput"
 	"strings"
 	"testing"
 )
@@ -53,5 +54,17 @@ func TestEventSummaryFiltersArbitraryNames(t *testing.T) {
 	s := EventSummary(map[string]int{"SingleTap": 3, "typed-password": 5, "KeyboardEvent": 2})
 	if strings.Contains(s, "password") || !strings.Contains(s, "SingleTap=3") {
 		t.Fatal(s)
+	}
+}
+
+func TestInputSummaryDistinguishesReceptionAndInjection(t *testing.T) {
+	r := Result{Profile: "input", Cleaned: true, Stats: session.Stats{Ready: true, FramesSent: 3, InputEventCounts: map[string]int{"SingleTap": 2}}}
+	if !strings.Contains(r.Summary(), "no se inyectan") {
+		t.Fatal(r.Summary())
+	}
+	r.InputAvailable = true
+	r.Input = yaminput.Stats{Handled: 2, Ignored: 1, Errors: 1}
+	if !strings.Contains(r.Summary(), "2 eventos procesados") || !strings.Contains(r.Summary(), "1 errores") || strings.Contains(r.Summary(), "no se inyectan") {
+		t.Fatal(r.Summary())
 	}
 }
