@@ -229,7 +229,35 @@ func (c *Controller) handle(event map[string]interface{}, name string, t wininpu
 		}
 		return true, nil
 	}
+	if name == "Zoomed" {
+		start, valid := inputBool(event, "startOfZoom")
+		if valid && start {
+			_, hasX := event["x"]
+			_, hasY := event["y"]
+			if hasX || hasY {
+				x, okX := inputNumber(event["x"])
+				y, okY := inputNumber(event["y"])
+				if !okX || !okY {
+					return true, fmt.Errorf("invalid zoom center")
+				}
+				if _, _, err := wininput.Coordinates(t, x, y); err != nil {
+					return true, fmt.Errorf("invalid zoom center")
+				}
+				c.lastX, c.lastY = x, y
+			}
+		}
+	}
 	if c.options.NativeGestures {
+		if name == "Scrolled" && isTwoFingerScroll(event["touchType"]) {
+			translated := map[string]interface{}{"x": event["x"], "y": event["y"]}
+			if v, present := event["startOfScroll"]; present {
+				translated["startOfPan"] = v
+			}
+			if v, present := event["endOfScroll"]; present {
+				translated["endOfPan"] = v
+			}
+			return c.nativeEvent(translated, "TwoFingerPanned", t)
+		}
 		if name == "TwoFingerPanned" || name == "Zoomed" {
 			return c.nativeEvent(event, name, t)
 		}
@@ -520,4 +548,13 @@ func (c *Controller) zoomWheel(t wininput.Target, delta int32) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// The original Mac scroll handler routes touchType=3 into its two-finger pan handler.
+func isTwoFingerScroll(value interface{}) bool {
+	if s, ok := value.(string); ok {
+		return s == "3"
+	}
+	n, ok := inputNumber(value)
+	return ok && n == 3
 }

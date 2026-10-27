@@ -26,7 +26,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.2", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.3", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -256,7 +256,7 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 		}
 		defer release()
 	}
-	stats, err = session.Run(ctx, conn, session.Options{InputEvent: receiveInput, InputCancel: cancelInput, Continuous: true, FPS: settings.FPS, Width: w, Height: h, Log: log, Progress: func(st session.Stats) {
+	stats, err = session.Run(ctx, conn, session.Options{AppGestures: settings.Touch && input != nil, InputEvent: receiveInput, InputCancel: cancelInput, Continuous: true, FPS: settings.FPS, Width: w, Height: h, Log: log, Progress: func(st session.Stats) {
 		encoder := "JPEG"
 		if info, ok := source.(interface{ EncoderName() string }); ok && info.EncoderName() != "" {
 			encoder = info.EncoderName()

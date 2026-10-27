@@ -18,6 +18,8 @@ import (
 )
 
 type Options struct {
+	// AppGestures routes Yam pinch gestures to the host instead of local bitmap zoom.
+	AppGestures bool
 	// InputEvent consumes a validated remote input event synchronously after
 	// the compatible handshake. Nil retains diagnostics without injecting input.
 	InputEvent func(map[string]interface{}) error
@@ -319,7 +321,12 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 				log("RX device information (personal fields omitted)")
 				if !hello {
 					hello = true
-					for _, s := range []string{fmt.Sprintf("Version:0.1 OS:%s Hardware:YamTrial Protocol:1.0.20 H264:0", runtime.GOOS), "keyCodeLevel:0", "waitASec", "stopStream", fmt.Sprintf("size:%dx%d", opt.Width, opt.Height)} {
+					controls := []string{fmt.Sprintf("Version:0.1 OS:%s Hardware:YamTrial Protocol:1.0.20 H264:0", runtime.GOOS), "keyCodeLevel:0"}
+					if opt.AppGestures {
+						controls = append(controls, "initZoomMode:1")
+					}
+					controls = append(controls, "waitASec", "stopStream", fmt.Sprintf("size:%dx%d", opt.Width, opt.Height))
+					for _, s := range controls {
 						if e := text(s); e != nil {
 							return st, e
 						}
@@ -367,6 +374,11 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 						peerTimer.Reset(opt.PeerTimeout)
 						peerDeadline = peerTimer.C
 						log("RX ReadyToReceive")
+						if opt.AppGestures {
+							if e := text("zoomMode:1"); e != nil {
+								return st, e
+							}
+						}
 						if e := text("startStream:0"); e != nil {
 							return st, e
 						}

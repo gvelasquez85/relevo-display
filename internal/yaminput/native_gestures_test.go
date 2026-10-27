@@ -113,3 +113,40 @@ func TestNativeMalformedScaleCancels(t *testing.T) {
 		t.Fatal(f.frames)
 	}
 }
+
+func TestNativePinchUsesReceivedGestureCenter(t *testing.T) {
+	c, f := newNativeInput(t)
+	emit(c, "Zoomed", map[string]interface{}{"scale": 1., "startOfZoom": true, "x": .2, "y": .3})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.frames) != 1 || len(f.frames[0]) != 2 {
+		t.Fatal("missing pair")
+	}
+	target := inputGeometry()
+	centerX := (f.frames[0][0].X + f.frames[0][1].X) / 2
+	centerY := f.frames[0][0].Y
+	wantX := int32(target.Screen.Min.X) + int32(.2*float64(target.Screen.Dx()-1))
+	wantY := int32(target.Screen.Min.Y) + int32(.3*float64(target.Screen.Dy()-1))
+	if abs32(centerX-wantX) > 1 || abs32(centerY-wantY) > 1 {
+		t.Fatal("pinch anchored to stale cursor", centerX, centerY, wantX, wantY)
+	}
+}
+func abs32(x int32) int32 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+func TestNativeScrollTouchTypeThreeRoutesPair(t *testing.T) {
+	c, f := newNativeInput(t)
+	emit(c, "Scrolled", map[string]interface{}{"x": 0., "y": 0., "touchType": "3", "startOfScroll": true})
+	emit(c, "Scrolled", map[string]interface{}{"x": .1, "y": .1, "touchType": "3", "endOfScroll": true})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.frames) != 2 || len(f.frames[0]) != 2 || f.frames[1][0].Phase != "up" {
+		t.Fatal("confirmed two-finger scroll stayed wheel", f.frames)
+	}
+	if len(f.mouse) != 0 {
+		t.Fatal("native scroll emitted wheel")
+	}
+}
