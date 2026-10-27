@@ -24,7 +24,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.14.0", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.0", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -38,6 +38,9 @@ type compatibleRunOptions struct {
 }
 
 func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func(string)) error {
+	if settings.Receiver() == "relevo" {
+		return nativeapp.RunDisplay(settings, stop, report, version)
+	}
 	return runCompatibleSession(settings, stop, report, compatibleRunOptions{})
 }
 func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, report func(string), opt compatibleRunOptions) (err error) {

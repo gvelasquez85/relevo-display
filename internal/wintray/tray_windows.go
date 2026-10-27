@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"relevo/internal/lantransport"
 	"runtime"
 	"sync"
 	"syscall"
@@ -177,6 +178,8 @@ func Run(o Options) error {
 	defer syscall.CloseHandle(syscall.Handle(singleton))
 	settings, loadErr := LoadSettings()
 	var hwnd, status, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, touchCheck, keyboardCheck, startButton, stopButton, installButton, saveButton, testsButton, yamTestsButton uintptr
+	var clientCombo, transportCombo, lanCombo uintptr
+	var lanAddresses = lantransport.Addresses()
 	var active, installing, disconnecting, closing, testsOpen bool
 	var stop chan struct{}
 	var mu sync.Mutex
@@ -212,8 +215,21 @@ func Run(o Options) error {
 		if active || installing || disconnecting {
 			enabled = 0
 		}
-		for _, h := range []uintptr{startButton, installButton, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, touchCheck, keyboardCheck, saveButton, testsButton, yamTestsButton} {
+		for _, h := range []uintptr{startButton, installButton, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, touchCheck, keyboardCheck, saveButton, testsButton, yamTestsButton, clientCombo, transportCombo, lanCombo} {
 			call("EnableWindow", h, enabled)
+		}
+		if enabled != 0 {
+			clientIndex := call("SendMessageW", clientCombo, 0x147, 0, 0)
+			transportEnabled := uintptr(0)
+			if clientIndex == 1 {
+				transportEnabled = 1
+			}
+			call("EnableWindow", transportCombo, transportEnabled)
+			lanEnabled := uintptr(0)
+			if clientIndex == 1 && call("SendMessageW", transportCombo, 0x147, 0, 0) == 1 {
+				lanEnabled = 1
+			}
+			call("EnableWindow", lanCombo, lanEnabled)
 		}
 		en := uintptr(0)
 
@@ -259,6 +275,22 @@ func Run(o Options) error {
 			s.Position = []string{"right", "left", "above", "below"}[p]
 		}
 		s.KeepAwake = call("SendMessageW", awakeCheck, 0xf0, 0, 0) == 1
+		ci := call("SendMessageW", clientCombo, 0x147, 0, 0)
+		if ci == 1 {
+			s.Client = "relevo"
+		} else {
+			s.Client = ""
+		}
+		ti := call("SendMessageW", transportCombo, 0x147, 0, 0)
+		if ci == 1 && ti == 1 {
+			s.Transport = "WiFi"
+		} else {
+			s.Transport = ""
+		}
+		li := int(call("SendMessageW", lanCombo, 0x147, 0, 0))
+		if li >= 0 && li < len(lanAddresses) {
+			s.LANAddress = lanAddresses[li]
+		}
 		s.Touch = call("SendMessageW", touchCheck, 0xf0, 0, 0) == 1
 		s.Keyboard = call("SendMessageW", keyboardCheck, 0xf0, 0, 0) == 1
 		return s
@@ -380,6 +412,11 @@ func Run(o Options) error {
 			if active || installing || disconnecting || o.OpenTests == nil {
 				return
 			}
+			settings = read()
+			if e := SaveSettings(settings); e != nil {
+				message(hwnd, e.Error())
+				return
+			}
 			testsOpen = true
 			call("ShowWindow", hwnd, 0)
 			notify(2)
@@ -408,6 +445,16 @@ func Run(o Options) error {
 				if e := o.ExportDiagnostic(); e != nil {
 					message(hwnd, e.Error())
 				}
+			}
+		case 28, 29:
+			if !active && !installing && !disconnecting {
+				if call("SendMessageW", clientCombo, 0x147, 0, 0) == 0 {
+					call("SendMessageW", transportCombo, 0x14e, 0, 0)
+				} else {
+					call("SendMessageW", resCombo, 0x14e, 0, 0)
+				}
+				settings = read()
+				update()
 			}
 		case 23:
 			if !active && !installing && !disconnecting {
@@ -515,19 +562,25 @@ func Run(o Options) error {
 		return fmt.Errorf("registrar ventana falló")
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(name)), instance)
-	hwnd = call("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(p(o.Title))), 0x00ca0000, 0x80000000, 0x80000000, 560, 665, 0, 0, instance, 0)
+	hwnd = call("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(p(o.Title))), 0x00ca0000, 0x80000000, 0x80000000, 560, 739, 0, 0, instance, 0)
 	if hwnd == 0 {
 		return fmt.Errorf("crear ventana falló")
 	}
 	font := syscall.NewLazyDLL("gdi32.dll")
 	hf, _, _ := font.NewProc("GetStockObject").Call(17)
-	child := func(class, text string, style uintptr, x, y, w, h int, id uintptr) uintptr {
+	childAt := func(class, text string, style uintptr, x, y, w, h int, id uintptr) uintptr {
 		ch := call("CreateWindowExW", 0, uintptr(unsafe.Pointer(p(class))), uintptr(unsafe.Pointer(p(text))), 0x50000000|style, uintptr(x), uintptr(y), uintptr(w), uintptr(h), hwnd, id, instance, 0)
 		call("SendMessageW", ch, 0x30, hf, 1)
 		return ch
 	}
+	child := func(class, text string, style uintptr, x, y, w, h int, id uintptr) uintptr {
+		if y >= 315 {
+			y += 74
+		}
+		return childAt(class, text, style, x, y, w, h, id)
+	}
 	child("STATIC", "Tu iPad 2 como pantalla de Windows", 0, 24, 20, 500, 28, 0)
-	child("STATIC", "Conecta por USB · Abre la app compatible · Inicia pantalla", 0, 24, 53, 500, 28, 0)
+	child("STATIC", "Elige cliente y conexión · Abre la app del iPad · Inicia pantalla", 0, 24, 53, 500, 28, 0)
 	child("STATIC", "Resolución (4:3)", 0, 24, 99, 180, 22, 0)
 	child("STATIC", "Fluidez (FPS)", 0, 220, 99, 130, 22, 0)
 	child("STATIC", "Calidad JPEG", 0, 370, 99, 140, 22, 0)
@@ -588,6 +641,27 @@ func Run(o Options) error {
 		call("SendMessageW", keyboardCheck, 0xf1, 1, 0)
 	}
 
+	childAt("STATIC", "Cliente del iPad", 0, 24, 305, 180, 20, 0)
+	childAt("STATIC", "Conexión", 0, 220, 305, 130, 20, 0)
+	childAt("STATIC", "IP de Windows", 0, 370, 305, 140, 20, 0)
+	clientCombo = childAt("COMBOBOX", "", 0x210003, 24, 329, 180, 150, 28)
+	transportCombo = childAt("COMBOBOX", "", 0x210003, 220, 329, 130, 150, 29)
+	lanCombo = childAt("COMBOBOX", "", 0x210003, 370, 329, 140, 150, 30)
+	ci, ti, li := 0, 0, 0
+	if settings.Receiver() == "relevo" {
+		ci = 1
+	}
+	if settings.Link() == "WiFi" {
+		ti = 1
+	}
+	for i, ip := range lanAddresses {
+		if ip == settings.LANAddress {
+			li = i
+		}
+	}
+	fill(clientCombo, []string{"Yam (actual)", "Relevo (app propia)"}, ci)
+	fill(transportCombo, []string{"USB", "Wi-Fi (QR)"}, ti)
+	fill(lanCombo, lanAddresses, li)
 	startButton = child("BUTTON", "Iniciar pantalla", 0x10001, 24, 315, 180, 38, 1)
 	stopButton = child("BUTTON", "Detener", 0x10000, 220, 315, 130, 38, 2)
 	status = child("EDIT", "", 0x200000|0x4|0x40|0x800, 24, 371, 486, 42, 0) // Scrollable, read-only error/progress text; never a modal session error.

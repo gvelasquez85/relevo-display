@@ -3,6 +3,7 @@ package wintray
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -10,6 +11,9 @@ import (
 )
 
 type Settings struct {
+	Client     string `json:"client,omitempty"`
+	Transport  string `json:"transport,omitempty"`
+	LANAddress string `json:"lan_address,omitempty"`
 	Touch      bool   `json:"touch"`
 	Keyboard   bool   `json:"keyboard"`
 	Mode       string `json:"mode"`
@@ -28,7 +32,38 @@ var Resolutions = []string{"1024x768", "1280x960", "1600x1200", "2048x1536"}
 func DefaultSettings() Settings {
 	return Settings{Touch: true, Keyboard: true, Resolution: "1024x768", FPS: 20, Quality: 70, Mode: "extend", Position: "right"}
 }
+func (s Settings) Receiver() string {
+	if s.Client == "" {
+		return "yam"
+	}
+	return s.Client
+}
+func (s Settings) Link() string {
+	if s.Transport == "" {
+		return "USB"
+	}
+	return s.Transport
+}
 func (s Settings) Validate() error {
+	if s.Receiver() != "yam" && s.Receiver() != "relevo" {
+		return fmt.Errorf("cliente del iPad no compatible")
+	}
+	if s.Link() != "USB" && s.Link() != "WiFi" {
+		return fmt.Errorf("conexión no compatible")
+	}
+	if s.Link() == "WiFi" {
+		if s.Receiver() != "relevo" {
+			return fmt.Errorf("Wi-Fi requiere nuestro cliente Relevo en el iPad")
+		}
+		ip := net.ParseIP(s.LANAddress)
+		if ip == nil || ip.To4() == nil || !ip.IsPrivate() {
+			return fmt.Errorf("selecciona la dirección privada de esta computadora")
+		}
+	}
+	if s.Receiver() == "relevo" && s.Resolution != "1024x768" {
+		return fmt.Errorf("el cliente Relevo actual utiliza 1024x768")
+	}
+
 	if s.Mode != "extend" && s.Mode != "desktop" {
 		return fmt.Errorf("modo no compatible: %s", s.Mode)
 	}

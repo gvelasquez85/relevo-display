@@ -15,7 +15,6 @@ import (
 	"relevo/internal/camerapreview"
 	"relevo/internal/desktop"
 	"relevo/internal/nativesession"
-	"relevo/internal/usbmux"
 	"relevo/internal/winaudio"
 	"relevo/internal/winfocus"
 	"relevo/internal/wininput"
@@ -47,6 +46,11 @@ func RunCLI() (result error) {
 }
 
 type trialConfig struct {
+	Position              string
+	Transport, LANAddress string
+	Continuous            bool
+	Pairing               func(context.Context, string) (<-chan struct{}, error)
+
 	Duration                                                                 time.Duration
 	FPS, Quality                                                             int
 	Mode, Endpoint                                                           string
@@ -59,13 +63,13 @@ func runTrial(ctx context.Context, cfg trialConfig, report func(string)) (result
 	if report == nil {
 		report = func(s string) { fmt.Println(s) }
 	}
-	duration, fps, quality, mode, endpoint := &cfg.Duration, &cfg.FPS, &cfg.Quality, &cfg.Mode, &cfg.Endpoint
+	duration, fps, quality, mode := &cfg.Duration, &cfg.FPS, &cfg.Quality, &cfg.Mode
 	touch, audio, camera, multitouch, keyboard, microphone, monitor, pointer := &cfg.Touch, &cfg.Audio, &cfg.Camera, &cfg.Multitouch, &cfg.Keyboard, &cfg.Microphone, &cfg.Monitor, &cfg.Pointer
 	if *monitor {
 		*microphone = true
 	}
-	report("Preparando prueba. Abre nuestro cliente Relevo en el iPad e inicia el enlace USB.")
-	if *duration < time.Second || *duration > 5*time.Minute || *fps < 1 || *fps > 60 || *quality < 1 || *quality > 100 {
+	report("Abre nuestra app Relevo en el iPad y elige USB o Wi-Fi según la conexión de Windows.")
+	if (!cfg.Continuous && (*duration < time.Second || *duration > 5*time.Minute)) || *fps < 1 || *fps > 60 || *quality < 1 || *quality > 100 {
 		return fmt.Errorf("invalid duration, FPS or quality")
 	}
 	if *mode != "pattern" && *mode != "desktop" && *mode != "extend" {
@@ -77,26 +81,19 @@ func runTrial(ctx context.Context, cfg trialConfig, report func(string)) (result
 	if *touch && *multitouch {
 		return fmt.Errorf("choose mouse touch or real multitouch, not both")
 	}
-	if e := localEndpoint(*endpoint); e != nil {
+	if !cfg.Continuous {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *duration)
+		defer cancel()
+	}
+	conn, cleanup, e := openConnection(ctx, cfg, report)
+	if e != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return e
 	}
-	ctx, cancel := context.WithTimeout(ctx, *duration)
-	defer cancel()
-	mux := usbmux.Client{Endpoint: *endpoint}
-	ds, e := mux.Devices()
-	if e != nil {
-		return fmt.Errorf("No se pudo abrir el servicio USB de Apple: %w", e)
-	}
-	device, e := usbmux.Choose(ds, 0)
-	if e != nil {
-		return e
-	}
-	report("iPad detectado por USB. Conectando con el cliente Relevo…")
-	conn, e := mux.Connect(device.ID, 52742)
-	if e != nil {
-		return fmt.Errorf("No se pudo conectar con Relevo del iPad. La app debe estar instalada, verificada y abierta: %w", e)
-	}
-	report("Enlace USB abierto. Preparando pantalla y funciones…")
+	defer cleanup()
 	defer conn.Close()
 	var input *wininput.Controller
 	var extended *wininput.ExtendedController
@@ -123,7 +120,7 @@ func runTrial(ctx context.Context, cfg trialConfig, report func(string)) (result
 			return desktop.EncodeJPEGQuality(moving, 1024, 768, *quality)
 		}
 	} else {
-		source, e := desktop.Open(ctx, desktop.Options{Mode: *mode, Position: "right", Display: 1, FPS: *fps, JPEGQuality: *quality, Width: 1024, Height: 768})
+		source, e := desktop.Open(ctx, desktop.Options{Mode: *mode, Position: nativePosition(cfg.Position), Display: 1, FPS: *fps, JPEGQuality: *quality, Width: 1024, Height: 768})
 		if e != nil {
 			return e
 		}
@@ -173,8 +170,18 @@ func runTrial(ctx context.Context, cfg trialConfig, report func(string)) (result
 		}
 
 	}
+	lastProgress := time.Now()
+	var lastFrames uint64
 	opts := nativesession.Options{Progress: func(st nativesession.Stats) {
-		report(fmt.Sprintf("Prueba activa · imágenes confirmadas: %d · contactos: %d · teclas: %d · paquetes de micrófono: %d", st.Frames, st.Touches, st.KeyboardEvents, st.MicrophonePackets))
+		now := time.Now()
+		fps := float64(st.Frames-lastFrames) / now.Sub(lastProgress).Seconds()
+		lastFrames = st.Frames
+		lastProgress = now
+		link := cfg.Transport
+		if link == "" {
+			link = "USB"
+		}
+		report(fmt.Sprintf("%.1f / %d FPS confirmados · %s · contactos: %d · teclas: %d · micrófono: %d paquetes", fps, cfg.FPS, link, st.Touches, st.KeyboardEvents, st.MicrophonePackets))
 	}, FPS: *fps, Next: next, TouchEnabled: *touch, AudioEnabled: *audio, CameraEnabled: *camera, MultiTouchEnabled: *multitouch, KeyboardEnabled: *keyboard, MicrophoneEnabled: *microphone, PointerEnabled: *pointer, InputModesEnabled: *pointer || *keyboard, InputFocusEnabled: *keyboard}
 	if inputTarget != nil && *keyboard {
 		opts.EditableAt = func(x, y float64) bool {
@@ -283,4 +290,11 @@ func localEndpoint(ep string) error {
 		return fmt.Errorf("endpoint TCP must use a loopback IP")
 	}
 	return nil
+}
+
+func nativePosition(position string) string {
+	if position == "" {
+		return "right"
+	}
+	return position
 }

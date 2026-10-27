@@ -13,8 +13,8 @@ relevo_out="$PWD/build/unsigned/RelevoDisplay.app"
 mkdir -p "$relevo_out"
 xcrun clang -target armv7-apple-ios9.3.5 -isysroot "$relevo_sdk" \
   -fobjc-arc -fmodules -miphoneos-version-min=9.3.5 -O2 \
-  Sources/main.m Sources/AppDelegate.m Sources/DisplayViewController.m Sources/RVConnection.m Sources/RVAudioPlayer.m Sources/RVMicrophone.m \
-  -framework UIKit -framework Foundation -framework CoreGraphics -framework AVFoundation -framework ImageIO -framework AudioToolbox -framework CoreImage -framework CoreMedia -framework CoreVideo -lobjc \
+  Sources/main.m Sources/AppDelegate.m Sources/DisplayViewController.m Sources/RVConnection.m Sources/RVLANTransport.m Sources/RVAudioPlayer.m Sources/RVMicrophone.m \
+  -framework Security -framework UIKit -framework Foundation -framework CoreGraphics -framework AVFoundation -framework ImageIO -framework AudioToolbox -framework CoreImage -framework CoreMedia -framework CoreVideo -lobjc \
   -o "$relevo_out/RelevoDisplay"
 python3 - "$relevo_out" <<'PY'
 from pathlib import Path

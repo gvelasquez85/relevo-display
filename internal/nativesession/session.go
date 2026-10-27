@@ -70,6 +70,30 @@ func Run(ctx context.Context, c net.Conn, o Options) (s Stats, err error) {
 	active := false
 	mode := "screen"
 	var taps tapTracker
+	// Touch injection queues Windows UI work. Retry focus on the session loop so
+	// the first probe cannot permanently miss a control that has not focused yet.
+	focusTimer := time.NewTimer(time.Hour)
+	focusTimer.Stop()
+	defer focusTimer.Stop()
+	var focusTick <-chan time.Time
+	var focusSequence uint32
+	var focusX, focusY float64
+	var focusDeadline time.Time
+	cancelFocus := func() {
+		focusTimer.Stop()
+		select {
+		case <-focusTimer.C:
+		default:
+		}
+		focusTick = nil
+	}
+	scheduleFocus := func(seq uint32, x, y float64) {
+		cancelFocus()
+		focusSequence, focusX, focusY = seq, x, y
+		focusDeadline = time.Now().Add(140 * time.Millisecond)
+		focusTimer.Reset(20 * time.Millisecond)
+		focusTick = focusTimer.C
+	}
 	focusReply := func(seq uint32, editable bool) error {
 		b, _ := json.Marshal(map[string]any{"editable": editable, "sequence": seq})
 		return write(nativewire.Frame{Type: nativewire.InputFocus, Sequence: seq, Payload: b})
@@ -103,6 +127,7 @@ func Run(ctx context.Context, c net.Conn, o Options) (s Stats, err error) {
 					return e
 				}
 			}
+			cancelFocus()
 			mode = m.Mode
 			touchState.Cancel()
 			keyState.Release()
@@ -131,6 +156,12 @@ func Run(ctx context.Context, c net.Conn, o Options) (s Stats, err error) {
 			if e != nil {
 				return e
 			}
+			for _, contact := range contacts {
+				if contact.Phase == "down" || contact.Phase == "cancel" {
+					cancelFocus()
+					break
+				}
+			}
 			if e = touchState.Apply(contacts); e != nil {
 				return e
 			}
@@ -142,7 +173,7 @@ func Run(ctx context.Context, c net.Conn, o Options) (s Stats, err error) {
 			s.Touches += uint64(len(contacts))
 			if o.InputFocusEnabled && o.EditableAt != nil {
 				if x, y, ok := taps.apply(contacts); ok {
-					return focusReply(f.Sequence, o.EditableAt(x, y))
+					scheduleFocus(f.Sequence, x, y)
 				}
 			}
 			return nil
@@ -196,6 +227,9 @@ func Run(ctx context.Context, c net.Conn, o Options) (s Stats, err error) {
 			if t.X == nil || t.Y == nil || math.IsNaN(*t.X) || math.IsNaN(*t.Y) || math.IsInf(*t.X, 0) || math.IsInf(*t.Y, 0) || *t.X < 0 || *t.X > 1 || *t.Y < 0 || *t.Y > 1 {
 				return fmt.Errorf("invalid touch coordinates")
 			}
+			if t.Phase == "down" || t.Phase == "cancel" {
+				cancelFocus()
+			}
 			if o.TouchEnabled && o.OnTouch != nil {
 				if e := o.OnTouch(TouchEvent{t.Phase, *t.X, *t.Y}); e != nil {
 					return e
@@ -204,7 +238,7 @@ func Run(ctx context.Context, c net.Conn, o Options) (s Stats, err error) {
 			s.Touches++
 			if mode == "screen" && o.TouchEnabled && o.InputFocusEnabled && o.EditableAt != nil {
 				if x, y, ok := taps.apply([]remoteinput.Contact{{ID: 1, Phase: t.Phase, X: *t.X, Y: *t.Y}}); ok {
-					return focusReply(f.Sequence, o.EditableAt(x, y))
+					scheduleFocus(f.Sequence, x, y)
 				}
 			}
 			return nil
@@ -318,6 +352,23 @@ func Run(ctx context.Context, c net.Conn, o Options) (s Stats, err error) {
 		select {
 		case <-ctx.Done():
 			return s, ctx.Err()
+		case <-focusTick:
+			focusTick = nil
+			if ctx.Err() != nil {
+				return s, ctx.Err()
+			}
+			if mode != "screen" {
+				continue
+			}
+			editable := o.EditableAt != nil && o.EditableAt(focusX, focusY)
+			if editable || !time.Now().Before(focusDeadline) {
+				if e := focusReply(focusSequence, editable); e != nil {
+					return s, e
+				}
+			} else {
+				focusTimer.Reset(20 * time.Millisecond)
+				focusTick = focusTimer.C
+			}
 		case <-heartbeat.C:
 			if e := write(nativewire.Frame{Type: nativewire.Ping}); e != nil {
 				return s, e

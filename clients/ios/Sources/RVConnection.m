@@ -1,4 +1,6 @@
 #import "RVConnection.h"
+#import "RVLANTransport.h"
+#import <arpa/inet.h>
 #import <sys/socket.h>
 #import <netinet/in.h>
 #import <unistd.h>
@@ -19,6 +21,8 @@
     NSUInteger _pendingControl; BOOL _pendingCamera; NSUInteger _pendingMicrophone;
     NSLock *_socketLock, *_writeLock;
     int _listener, _peer;
+    RVLANTransport *_secure;
+    BOOL _wifi;
 }
 static uint16_t RVRead16(const uint8_t *p) { return ((uint16_t)p[0] << 8) | p[1]; }
 static uint32_t RVRead32(const uint8_t *p) { return ((uint32_t)RVRead16(p) << 16) | RVRead16(p + 2); }
@@ -57,7 +61,7 @@ static BOOL RVWriteAll(int fd, const void *buffer, size_t length) {
     [_writeLock lock];
     uint8_t header[16] = {'R','V','L','1'};
     RVWrite16(header + 4, type); RVWrite16(header + 6, 0); RVWrite32(header + 8, sequence); RVWrite32(header + 12, (uint32_t)data.length);
-    BOOL ok = self.generation == generation && RVWriteAll(fd, header, sizeof(header)) && (!data.length || RVWriteAll(fd, data.bytes, data.length));
+    BOOL ok = self.generation == generation && [self write:fd buffer:header length:sizeof(header)] && (!data.length || [self write:fd buffer:data.bytes length:data.length]);
     [_writeLock unlock]; return ok;
 }
 - (BOOL)sendJSON:(NSDictionary *)json type:(uint16_t)type fd:(int)fd generation:(NSUInteger)generation {
@@ -117,6 +121,46 @@ static BOOL RVWriteAll(int fd, const void *buffer, size_t length) {
     if(self.microphoneAccepted && packet.length>=10 && packet.length<=890 && !((packet.length-8)&1)) [self enqueue:packet type:13];
 }
 - (void)sendCamera:(NSData *)jpeg { if(self.cameraAccepted && jpeg.length && jpeg.length<=512*1024) [self enqueue:jpeg type:8]; }
+- (BOOL)read:(int)fd buffer:(void *)buffer length:(size_t)length { return _secure?[_secure read:buffer length:length]:RVReadAll(fd,buffer,length); }
+- (BOOL)write:(int)fd buffer:(const void *)buffer length:(size_t)length { return _secure?[_secure write:buffer length:length]:RVWriteAll(fd,buffer,length); }
+static NSData *RVHex(NSString *text,NSUInteger length) {
+    if(text.length!=length*2)return nil;NSMutableData *data=[NSMutableData dataWithLength:length];uint8_t *p=data.mutableBytes;
+    for(NSUInteger i=0;i<length*2;i++){unichar c=[text characterAtIndex:i];int n=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:-1;if(n<0)return nil;p[i/2]=(p[i/2]<<4)|n;}return data;
+}
+- (BOOL)startWiFiWithPairingURI:(NSString *)uri {
+    NSURLComponents *url=[NSURLComponents componentsWithString:uri];
+    if(![url.scheme isEqualToString:@"relevo"] || ![url.host isEqualToString:@"pair"] || url.user || url.password || url.fragment || url.port || url.path.length)return NO;
+    NSMutableDictionary *fields=[NSMutableDictionary new];
+    for(NSURLQueryItem *item in url.queryItems){if(fields[item.name] || !item.value)return NO;fields[item.name]=item.value;}
+    if(fields.count!=4 || ![fields[@"port"] isEqualToString:@"52743"])return NO;
+    NSString *host=fields[@"host"];NSData *pin=RVHex(fields[@"pin"],32),*token=RVHex(fields[@"token"],16);
+    struct in_addr ip;if(!host || inet_pton(AF_INET,host.UTF8String,&ip)!=1 || !pin || !token)return NO;
+    uint32_t address=ntohl(ip.s_addr);
+    if(!((address&0xff000000)==0x0a000000 || (address&0xfff00000)==0xac100000 || (address&0xffff0000)==0xc0a80000))return NO;
+    [self stop];NSUInteger generation=self.generation;
+    [self status:@"Conectando por Wi-Fi seguro…" generation:generation];
+    dispatch_async(_reader, ^{[self runWiFi:host pin:pin token:token generation:generation];});return YES;
+}
+- (void)runWiFi:(NSString *)host pin:(NSData *)pin token:(NSData *)token generation:(NSUInteger)generation {
+    if(self.generation!=generation)return;
+    int fd=socket(AF_INET,SOCK_STREAM,0);if(fd<0){[self status:@"No se pudo crear Wi-Fi." generation:generation];return;}
+    [_socketLock lock];if(self.generation!=generation){[_socketLock unlock];close(fd);return;}_peer=fd;[_socketLock unlock];
+    int yes=1;setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&yes,sizeof(yes));int flags=fcntl(fd,F_GETFL,0);BOOL connected=flags>=0 && fcntl(fd,F_SETFL,flags|O_NONBLOCK)==0;
+    struct sockaddr_in address;memset(&address,0,sizeof(address));address.sin_len=sizeof(address);address.sin_family=AF_INET;address.sin_port=htons(52743);inet_pton(AF_INET,host.UTF8String,&address.sin_addr);
+    if(connected){int status=connect(fd,(struct sockaddr *)&address,sizeof(address));connected=status==0;
+        if(!connected && errno==EINPROGRESS){for(int i=0;i<100 && self.generation==generation;i++){struct pollfd p={fd,POLLOUT,0};int result=poll(&p,1,100);if(result>0){int error=0;socklen_t size=sizeof(error);connected=getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&size)==0 && !error;break;}if(result<0 && errno!=EINTR)break;}}}
+    NSString *result=@"Wi-Fi no disponible o emparejamiento rechazado. Genera una conexión nueva en Windows.";
+    if(connected && self.generation==generation){
+        _secure=[[RVLANTransport alloc]initWithSocket:fd pin:pin];_wifi=YES;
+        if(_secure && [_secure authenticateToken:token] && self.generation==generation && [self sendJSON:@{@"protocol":@1,@"width":@1024,@"height":@768} type:1 fd:fd generation:generation])result=[self receive:fd generation:generation];
+    }
+    [_writeLock lock];[_socketLock lock];
+    if(_peer==fd)_peer=-1;shutdown(fd,SHUT_RDWR);close(fd);_secure=nil;_wifi=NO;
+    BOOL current=self.generation==generation;if(current)self.generation=generation+1;NSUInteger ended=self.generation;
+    [_socketLock unlock];[_writeLock unlock];
+    if(!current)return;
+    dispatch_async(dispatch_get_main_queue(), ^{if(self.generation==ended){[self stop];if(self.statusChanged)self.statusChanged(result);}});
+}
 - (void)start {
     [self stop];
     NSUInteger generation = self.generation;
@@ -196,14 +240,14 @@ static BOOL RVWriteAll(int fd, const void *buffer, size_t length) {
     while (self.generation == generation) {
         @autoreleasepool {
             uint8_t header[16];
-            if (!RVReadAll(fd, header, sizeof(header))) break;
+            if (![self read:fd buffer:header length:sizeof(header)]) break;
             uint16_t type = RVRead16(header + 4), flags = RVRead16(header + 6);
             uint32_t sequence = RVRead32(header + 8), length = RVRead32(header + 12);
             if (memcmp(header, "RVL1", 4) || flags) return @"Protocolo inválido: cabecera USB.";
             BOOL allowed = (type == 2 && !ready && length > 0 && length <= 4096) || (type == 3 && ready && length > 0 && length <= 4 * 1024 * 1024) || ((type == 6 || type == 7) && length == 0) || (type==14 && ready && self.inputFocusAccepted && length>0 && length<=4096) || (type==9 && ready && self.audioAccepted && length>=10 && length<=890);
             if (!allowed) return @"Protocolo inválido: tipo, tamaño u orden no admitido.";
             NSMutableData *payload = [NSMutableData dataWithLength:length];
-            if (length && !RVReadAll(fd, payload.mutableBytes, length)) break;
+            if (length && ![self read:fd buffer:payload.mutableBytes length:length]) break;
             if (type == 6) { if (![self send:7 sequence:sequence data:nil fd:fd generation:generation]) break; }
             else if (type == 2) {
                 id json = [NSJSONSerialization JSONObjectWithData:payload options:0 error:nil];
@@ -223,7 +267,7 @@ static BOOL RVWriteAll(int fd, const void *buffer, size_t length) {
                 if (![self sendJSON:status type:5 fd:fd generation:generation]) break;
                 ready = YES;
                 dispatch_async(dispatch_get_main_queue(), ^{if(self.generation==generation && self.extendedCapabilitiesChanged)self.extendedCapabilitiesChanged(self.multitouchAccepted,self.keyboardAccepted,self.microphoneAccepted);});
-                [self status:@"Enlace USB conectado · pantalla 1024 × 768." generation:generation];
+                [self status:_wifi?@"Wi-Fi seguro conectado · pantalla 1024 × 768.":@"Enlace USB conectado · pantalla 1024 × 768." generation:generation];
             } else if(type==14) {
                 id json=[NSJSONSerialization JSONObjectWithData:payload options:0 error:nil];
                 if(![json isKindOfClass:[NSDictionary class]] || [json count]!=2)return @"Foco inválido.";
@@ -258,7 +302,7 @@ static BOOL RVWriteAll(int fd, const void *buffer, size_t length) {
             }
         }
     }
-    return @"Enlace USB desconectado. Pulsa Iniciar para volver a conectar.";
+    return _wifi?@"Wi-Fi desconectado. Empareja de nuevo para conectar.":@"Enlace USB desconectado. Pulsa Iniciar para volver a conectar.";
 }
 - (void)dealloc {
     if (_listener >= 0) { shutdown(_listener, SHUT_RDWR); close(_listener); }

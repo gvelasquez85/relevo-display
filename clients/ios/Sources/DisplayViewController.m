@@ -17,6 +17,36 @@
 - (void)deleteBackward {BOOL empty=!self.text.length && !self.markedTextRange;[super deleteBackward];if(empty && self.emptyDelete)self.emptyDelete();}
 @end
 
+// Pairing QR is processed locally; neither the URI nor its secret is persisted.
+@interface RVPairScanner : UIViewController <AVCaptureMetadataOutputObjectsDelegate>
+@property(nonatomic,copy) void (^completed)(NSString *uri);
+@end
+@implementation RVPairScanner {
+    AVCaptureSession *_scanner;AVCaptureVideoPreviewLayer *_layer;dispatch_queue_t _queue;BOOL _finished;
+}
+- (void)viewDidLoad {
+    [super viewDidLoad];self.view.backgroundColor=[UIColor blackColor];
+    _queue=dispatch_queue_create("com.relevodisplay.pairingcamera",DISPATCH_QUEUE_SERIAL);_scanner=[AVCaptureSession new];
+    AVCaptureDevice *device=[AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
+    AVCaptureDeviceInput *input=device?[AVCaptureDeviceInput deviceInputWithDevice:device error:nil]:nil;
+    AVCaptureMetadataOutput *output=[AVCaptureMetadataOutput new];
+    if(input && [_scanner canAddInput:input])[_scanner addInput:input];
+    if([_scanner canAddOutput:output])[_scanner addOutput:output];
+    [output setMetadataObjectsDelegate:self queue:dispatch_get_main_queue()];
+    if([output.availableMetadataObjectTypes containsObject:AVMetadataObjectTypeQRCode])output.metadataObjectTypes=@[AVMetadataObjectTypeQRCode];
+    _layer=[AVCaptureVideoPreviewLayer layerWithSession:_scanner];_layer.videoGravity=AVLayerVideoGravityResizeAspectFill;[self.view.layer addSublayer:_layer];
+    UIButton *cancel=[UIButton buttonWithType:UIButtonTypeSystem];cancel.frame=CGRectMake(16,16,160,48);[cancel setTitle:@"Cancelar" forState:UIControlStateNormal];cancel.backgroundColor=[UIColor whiteColor];[cancel addTarget:self action:@selector(cancel) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:cancel];
+    UILabel *hint=[[UILabel alloc]initWithFrame:CGRectMake(190,16,650,48)];hint.text=@"Escanea el QR que muestra Relevo en Windows";hint.textColor=[UIColor whiteColor];hint.backgroundColor=[UIColor blackColor];[self.view addSubview:hint];
+}
+- (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];_layer.frame=self.view.bounds;AVCaptureConnection *c=_layer.connection;if(c.isVideoOrientationSupported)c.videoOrientation=AVCaptureVideoOrientationLandscapeRight;}
+- (void)viewDidAppear:(BOOL)animated {[super viewDidAppear:animated];AVCaptureSession *session=_scanner;dispatch_async(_queue,^{[session startRunning];});}
+- (void)viewWillDisappear:(BOOL)animated {[super viewWillDisappear:animated];AVCaptureSession *session=_scanner;dispatch_async(_queue,^{[session stopRunning];});}
+- (void)cancel {if(_finished)return;_finished=YES;if(self.completed)self.completed(nil);}
+- (void)captureOutput:(AVCaptureOutput *)output didOutputMetadataObjects:(NSArray *)objects fromConnection:(AVCaptureConnection *)connection {
+    if(_finished)return;for(AVMetadataMachineReadableCodeObject *object in objects){NSString *value=object.stringValue;if([object.type isEqualToString:AVMetadataObjectTypeQRCode] && [value hasPrefix:@"relevo://pair?"]){_finished=YES;if(self.completed)self.completed(value);break;}}
+}
+@end
+
 @interface DisplayViewController () <AVAudioPlayerDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, UITextFieldDelegate>
 @property(atomic) NSUInteger cameraGeneration;
 @property(atomic) BOOL cameraUSBEnabled;
@@ -30,6 +60,7 @@
     UIView *_trackpad;
     UILabel *_modeHint;
     BOOL _remoteEditable, _pointerDragging;
+    CGRect _keyboardScreenFrame;
     UILabel *_micStatus;
     UITextField *_keyboard;
     NSMapTable *_contacts;
@@ -55,7 +86,7 @@
     RVConnection *_link;
     UIImageView *_display;
     UILabel *_linkStatus;
-    UIButton *_linkStart, *_linkStop;
+    UIButton *_linkStart, *_linkStop, *_wifiStart;
 }
 - (UILabel *)label:(NSString *)text size:(CGFloat)size {
     UILabel *label = [UILabel new];
@@ -98,7 +129,10 @@
     };
     _link.capabilitiesChanged=^(BOOL touch,BOOL camera,BOOL audio){
         DisplayViewController *controller=weakSelf; if(!controller)return;
-        if(!touch && !camera && !audio) [UIApplication sharedApplication].idleTimerDisabled=NO;
+        if(!touch && !camera && !audio && !controller->_link.keyboardAccepted && !controller->_link.multitouchAccepted) {
+            [UIApplication sharedApplication].idleTimerDisabled=NO;
+            controller->_display.image=nil;controller->_display.hidden=YES;
+        }
         controller.cameraUSBEnabled=camera && controller->_cameraUSBRequested;
         if(!touch) controller->_remoteTouch=nil;
         if(!audio) [controller->_usbAudio stop];
@@ -143,7 +177,8 @@
     _note = [self label:@"Pantalla: teclado sólo al tocar un campo editable. Teclado y Mouse: controles dedicados sin imagen. Audio y micrófono se prueban por separado." size:16];
     _linkStatus = [self label:@"USB detenido." size:16];
     _linkStart = [self button:@"Iniciar enlace USB" action:@selector(startLink)];
-    _linkStop = [self button:@"Detener enlace USB" action:@selector(stopLink)];
+    _linkStop = [self button:@"Detener enlace" action:@selector(stopLink)];
+    _wifiStart=[self button:@"Conectar Wi-Fi" action:@selector(pairWiFi)];
     _cameraStart = [self button:@"Iniciar cámara" action:@selector(startCamera)];
     _cameraStop = [self button:@"Detener cámara" action:@selector(stopCamera)];
     _audioStart = [self button:@"Reproducir tono" action:@selector(playTone)];
@@ -186,6 +221,7 @@
     [self updateInputMode];
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
     [nc addObserver:self selector:@selector(background:) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [nc addObserver:self selector:@selector(keyboardFrameChanged:) name:UIKeyboardWillChangeFrameNotification object:nil];
     [nc addObserver:self selector:@selector(cameraInterrupted:) name:AVCaptureSessionWasInterruptedNotification object:_session];
     [nc addObserver:self selector:@selector(cameraFailed:) name:AVCaptureSessionRuntimeErrorNotification object:_session];
     [nc addObserver:self selector:@selector(audioInterrupted:) name:AVAudioSessionInterruptionNotification object:nil];
@@ -197,6 +233,9 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGFloat w = self.view.bounds.size.width, h = self.view.bounds.size.height;
+    CGRect keyboardInView=[self.view convertRect:_keyboardScreenFrame fromView:nil];
+    CGRect overlap=CGRectIntersection(self.view.bounds,keyboardInView);
+    CGFloat visibleH=CGRectIsNull(overlap)?h:MIN(h,CGRectGetMinY(overlap));
     CGFloat gap = 16, side = MIN(340, w * 0.40), left = w - side - gap;
     _title.frame = CGRectMake(gap, 16, w - 2 * gap, 48);
     _preview.frame = CGRectMake(gap, 80, MAX(0, left - 2 * gap), MAX(0, h - 104));
@@ -221,26 +260,62 @@
     _audioStop.frame=CGRectMake(left,378,side,38);
     _usbAudioStart.frame=CGRectMake(left,422,side,38);
     _usbAudioStop.frame=CGRectMake(left,466,side,38);
-    _linkStart.frame=CGRectMake(left,510,side,38);
+    _linkStart.frame=CGRectMake(left,510,(side-8)/2,38);
+    _wifiStart.frame=CGRectMake(left+(side+8)/2,510,(side-8)/2,38);
     _linkStop.frame=CGRectMake(left,554,side,38);
     _linkStatus.frame=CGRectMake(left,598,side,58);
-    _inputMode.frame=CGRectMake(gap,h-52,280,36);
+    // Keep mode controls and the whole remote image above the software keyboard.
+    // Coordinates are always derived from this displayed aspect-fit rectangle.
+    if(visibleH<h){
+        _display.frame=CGRectMake(gap,80,MAX(0,left-2*gap),MAX(0,visibleH-140));
+        _linkStop.frame=CGRectMake(left,80,side,38);
+    }
+    _inputMode.frame=CGRectMake(gap,MAX(0,visibleH-52),280,36);
     _trackpad.frame=_display.frame;_modeHint.frame=CGRectInset(_display.frame,20,30);
     _display.hidden=_inputMode.selectedSegmentIndex!=0 || !_display.image;
     _trackpad.hidden=_inputMode.selectedSegmentIndex!=2;
     _modeHint.hidden=_inputMode.selectedSegmentIndex==0;
     if(_inputMode.selectedSegmentIndex!=0){_preview.hidden=YES;[self.view bringSubviewToFront:_trackpad];[self.view bringSubviewToFront:_modeHint];}
     else _preview.hidden=NO;
-    _micButton.frame=CGRectMake(gap+288,h-52,180,36);
+    _micButton.frame=CGRectMake(gap+288,MAX(0,visibleH-52),180,36);
     _micStatus.frame=CGRectMake(gap,h-90,MAX(0,left-2*gap),34);
     _keyboard.frame=CGRectMake(0,0,1,1);
     _note.frame=CGRectMake(left,660,side,MAX(0,h-666));
+}
+- (void)connectPairingURI:(NSString *)uri {
+    if(!uri)return;
+    [self stopLink];
+    if(![_link startWiFiWithPairingURI:uri]){
+        UIAlertController *error=[UIAlertController alertControllerWithTitle:@"Conexión Wi-Fi inválida" message:@"Genera una conexión nueva en el GUI de Relevo Windows y escanea su QR o pega el enlace completo." preferredStyle:UIAlertControllerStyleAlert];
+        [error addAction:[UIAlertAction actionWithTitle:@"Aceptar" style:UIAlertActionStyleDefault handler:nil]];[self presentViewController:error animated:YES completion:nil];
+    }
+}
+- (void)pairWiFi {
+    if(!_visible)return;
+    UIAlertController *dialog=[UIAlertController alertControllerWithTitle:@"Conectar por Wi-Fi" message:@"Ambos equipos deben estar en la misma red privada. En Relevo Windows genera una conexión Wi-Fi. El enlace contiene una clave temporal: no lo compartas." preferredStyle:UIAlertControllerStyleAlert];
+    [dialog addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"relevo://pair?…";field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeNone;field.secureTextEntry=YES;}];
+    __weak DisplayViewController *weakSelf=self;
+    [dialog addAction:[UIAlertAction actionWithTitle:@"Conectar enlace" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf connectPairingURI:dialog.textFields.firstObject.text];}]];
+    [dialog addAction:[UIAlertAction actionWithTitle:@"Escanear QR" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[weakSelf scanPairingQR];}]];
+    [dialog addAction:[UIAlertAction actionWithTitle:@"Cancelar" style:UIAlertActionStyleCancel handler:nil]];[self presentViewController:dialog animated:YES completion:nil];
+}
+- (void)scanPairingQR {
+    [self stopCamera];
+    __weak DisplayViewController *weakSelf=self;
+    void (^show)(BOOL)=^(BOOL allowed){dispatch_async(dispatch_get_main_queue(),^{DisplayViewController *controller=weakSelf;if(!controller || !controller->_visible)return;
+        if(!allowed){controller->_linkStatus.text=@"Autoriza la cámara para escanear el QR o pega el enlace Wi-Fi.";return;}
+        RVPairScanner *scanner=[RVPairScanner new];scanner.modalPresentationStyle=UIModalPresentationFullScreen;
+        scanner.completed=^(NSString *uri){[weakSelf dismissViewControllerAnimated:YES completion:^{if(uri)[weakSelf connectPairingURI:uri];}];};
+        [controller presentViewController:scanner animated:YES completion:nil];
+    });};
+    AVAuthorizationStatus state=[AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+    if(state==AVAuthorizationStatusNotDetermined)[AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:show];else show(state==AVAuthorizationStatusAuthorized);
 }
 - (void)startLink {
     if (!_visible || [UIApplication sharedApplication].applicationState != UIApplicationStateActive) return;
     _display.hidden = NO; [_link start];
 }
-- (void)stopLink { [UIApplication sharedApplication].idleTimerDisabled=NO; [self cancelRemoteTouch]; [self releasePointer]; _remoteEditable=NO; [_link invalidateInputFocus]; [self releaseKeyboard]; [_keyboard resignFirstResponder]; [self stopMicrophone]; [self stopUSBAudio]; self.cameraUSBEnabled=NO; _cameraUSBRequested=NO; [_usbCameraToggle setTitle:@"Enviar cámara USB" forState:UIControlStateNormal]; [_link stop]; _display.image = nil; _display.hidden = YES; _linkStatus.text = @"USB detenido."; }
+- (void)stopLink { [UIApplication sharedApplication].idleTimerDisabled=NO; [self cancelRemoteTouch]; [self releasePointer]; _remoteEditable=NO; [_link invalidateInputFocus]; [self releaseKeyboard]; [_keyboard resignFirstResponder]; [self stopMicrophone]; [self stopUSBAudio]; self.cameraUSBEnabled=NO; _cameraUSBRequested=NO; [_usbCameraToggle setTitle:@"Enviar cámara USB" forState:UIControlStateNormal]; [_link stop]; _display.image = nil; _display.hidden = YES; _linkStatus.text = @"Enlace detenido."; }
 - (void)startCamera {
     if (!_visible || [UIApplication sharedApplication].applicationState != UIApplicationStateActive) return;
     NSUInteger generation = ++self.cameraGeneration;
@@ -411,6 +486,14 @@ static void RVLE32(uint8_t *p, uint32_t value) { RVLE16(p, value & 65535); RVLE1
         if(self.cameraUSBEnabled && jpeg.length<=512*1024) [_link sendCamera:jpeg];
     }
 }
+- (void)keyboardFrameChanged:(NSNotification *)notification {
+    NSValue *frame=notification.userInfo[UIKeyboardFrameEndUserInfoKey];
+    if(!frame)return;
+    // A geometry change must never remap a finger that is still held on Windows.
+    [self cancelRemoteTouch];[self releasePointer];
+    _keyboardScreenFrame=frame.CGRectValue;
+    [self.view setNeedsLayout];[self.view layoutIfNeeded];
+}
 - (BOOL)pointForTouch:(UITouch *)touch normalized:(CGPoint *)point {
     if(_display.hidden || !_display.image)return NO;
     CGSize bounds=_display.bounds.size; CGFloat scale=MIN(bounds.width/1024.0,bounds.height/768.0);
@@ -437,7 +520,7 @@ static void RVLE32(uint8_t *p, uint32_t value) { RVLE16(p, value & 65535); RVLE1
     if(batch.count)[_link sendContacts:batch];
 }
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if(_inputMode.selectedSegmentIndex!=0)return;
+    if(!_visible || [UIApplication sharedApplication].applicationState!=UIApplicationStateActive || _inputMode.selectedSegmentIndex!=0)return;
     if(_link.multitouchAccepted){[self sendChangedTouches:touches phase:@"down"];return;}
     if(_remoteTouch || !_link.touchAccepted)return;
     UITouch *touch=touches.anyObject;CGPoint p;if(touch.view!=_display || ![self pointForTouch:touch normalized:&p])return;
@@ -508,7 +591,7 @@ static void RVLE32(uint8_t *p, uint32_t value) { RVLE16(p, value & 65535); RVLE1
     else [self releasePointer];
 }
 - (void)keyboardChanged:(UITextField *)field {
-    if(field.markedTextRange || !field.text.length)return;
+    if(!_visible || !_link.keyboardAccepted || !field.isFirstResponder || field.markedTextRange || !field.text.length)return;
     NSString *text=[field.text copy];field.text=@"";
     // UTF-8 bound without splitting a composed character or losing IME marked text.
     __block NSMutableString *chunk=[NSMutableString new];
@@ -525,7 +608,7 @@ static void RVLE32(uint8_t *p, uint32_t value) { RVLE16(p, value & 65535); RVLE1
     }];
     if(chunk.length)[_link sendKey:@{@"kind":@"text",@"text":chunk}];
 }
-- (BOOL)textFieldShouldReturn:(UITextField *)field {if(!field.markedTextRange)[_link sendKey:@{@"kind":@"press",@"code":@"Enter"}];return NO;}
+- (BOOL)textFieldShouldReturn:(UITextField *)field {if(_visible && _link.keyboardAccepted && field.isFirstResponder && !field.markedTextRange)[_link sendKey:@{@"kind":@"press",@"code":@"Enter"}];return NO;}
 - (void)controlKey:(UIButton *)button {
     NSString *code=button.currentTitle;
     if([code isEqualToString:@"Cerrar"]){_remoteEditable=NO;[_link invalidateInputFocus];[self releaseKeyboard];[_keyboard resignFirstResponder];return;}

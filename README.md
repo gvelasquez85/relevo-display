@@ -7,15 +7,16 @@ Reutiliza iPads antiguos como pantallas de computador. El equipo de referencia e
 | Componente | Estado actual |
 | --- | --- |
 | Windows, pantalla compatible | Funciona con la app Yam Display ya instalada en el iPad. El usuario confirmó imagen y mejor fluidez, con unos 45–50 FPS enviados; no es una medición de latencia ni de cuadros presentados. |
-| Windows, entrega actual | **0.14.0 experimental**, una aplicación con pantalla, «Pruebas y nuevas funciones» y «Exportar diagnóstico». |
-| Cliente iOS propio | UIKit/Objective-C, ARMv7, mínimo iOS 9.3.5. Compilado, firmado e instalado, pero el iPad rechaza la verificación de Apple y aún no permite probar su ejecución. |
-| Touch, teclado, cámara y audio propios | Código y pruebas automatizadas disponibles. Las pruebas con el cliente propio en el dispositivo siguen bloqueadas por su verificación. |
+| Windows, entrega actual | **0.15.0 experimental**, una aplicación con pantalla, «Pruebas y nuevas funciones» y «Exportar diagnóstico». |
+| Cliente iOS propio | UIKit/Objective-C, ARMv7, mínimo iOS 9.3.5. La versión 0.15.0 está compilada y empaquetada sin firma. Una versión anterior fue firmada e instalada, pero el iPad rechazó la verificación de Apple; la ejecución del cliente propio sigue pendiente de validación. |
+| Touch y teclado propios | Multitouch hasta 10 contactos, teclado Unicode/atajos, apertura tras un toque en un campo nativo editable, modo teclado y trackpad manuales. Compilado ARMv7; prueba física pendiente por verificación Apple. |
+| Cámara y audio propios | Código y pruebas automatizadas disponibles; ejecución física pendiente con el cliente propio. |
 | Cámara y micrófono virtuales de Windows | Componentes en desarrollo. La vista previa de cámara y la escucha local del micrófono **no crean dispositivos seleccionables** por otras aplicaciones. |
 | Linux / Raspberry Pi | Prototipos de captura y extensión según compositor; pendientes de validación física. |
 | macOS | Prototipo de captura y patrón de prueba; sin implementación propia de pantalla extendida. |
-| Wi-Fi | Diseño y selección de metadatos de transporte; sin sesión inalámbrica implementada. |
+| Wi-Fi | Implementado para el cliente propio: QR temporal, TLS 1.2, pin SHA256 y token; interoperabilidad local macOS comprobada. Pendiente validación física en iOS 9 / Windows. |
 
-La ruta compatible de pantalla se conserva mientras se completa el cliente propio. Relevo no incluye la app propietaria del iPad ni elimina o modifica su licenciamiento.
+El GUI permite seleccionar «Yam (actual)» o «Relevo (app propia)» y, para Relevo, USB o Wi-Fi. Wi-Fi requiere elegir una IP privada de Windows y escanear el QR desde el cliente iPad; no necesita los servicios USB de Apple. El cliente propio utiliza 1024×768. La apertura automática del teclado detecta controles Edit/RichEdit nativos; controles personalizados y navegadores requieren el modo manual. La ruta compatible de pantalla se conserva mientras se valida físicamente el cliente propio. Relevo no incluye la app propietaria del iPad ni elimina o modifica su licenciamiento.
 
 ## Una sola entrega y pruebas desde la aplicación
 

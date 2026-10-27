@@ -30,15 +30,17 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.6</string>
+	<string>0.15.0</string>
 	<key>CFBundleVersion</key>
-	<string>6</string>
+	<string>15</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Relevo permite ver la cámara y enviarla por USB al computador sólo cuando lo activas. No graba imágenes.</string>
+	<string>Relevo permite ver la cámara y enviarla por USB o Wi-Fi al computador sólo cuando lo activas. No graba imágenes. También permite escanear el QR de conexión de Windows localmente.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Relevo se conecta al equipo Windows de tu red local únicamente mediante el enlace temporal que escaneas o introduces.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Relevo envía audio del micrófono al computador por USB sólo cuando pulsas Enviar micrófono. No graba audio.</string>
+	<string>Relevo envía audio del micrófono al computador por USB o Wi-Fi sólo cuando pulsas Enviar micrófono. No graba audio.</string>
 	<key>UILaunchImages</key>
 	<array/>
 	<key>UIRequiredDeviceCapabilities</key>

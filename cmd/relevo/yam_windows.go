@@ -13,11 +13,14 @@ import (
 )
 
 func openYamTests(base wintray.Settings) {
+	base.Client = ""
+	base.Transport = ""
+	base.LANAddress = "" // Compatible tests always use Yam USB.
 	var previous30, previous60 *yamchecks.Result
 	reportIntro := fmt.Sprintf("Usa Yam abierto por USB. Ajustes de la ventana principal: %s · %s · %s. Para cambiar resolución, posición o modo, vuelve a Relevo.", base.Resolution, base.Mode, base.Position)
 	err := wintray.RunLab(wintray.LabOptions{
 		Embedded: true, InputField: true, Profiles: wintray.YamProfiles(), Validate: wintray.ValidateYamSettings,
-		Title: "Relevo Display 0.14.0 · Pruebas con Yam", Intro: reportIntro,
+		Title: "Relevo Display 0.15.0 · Pruebas con Yam", Intro: reportIntro,
 		Footer:      "Yam: touch de un contacto, gestos interpretados y teclado. Sin multitouch completo ni apertura automática del teclado. No se guarda texto.",
 		ActionLabel: "Abrir solicitud UAC", ActionProfile: "uac", Action: requestUACProbe,
 		Check: func() (string, error) {

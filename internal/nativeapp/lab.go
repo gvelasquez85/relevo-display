@@ -50,7 +50,7 @@ func checkLabUSB() (string, error) {
 		}
 	}
 	if usb == 0 {
-		return fmt.Sprintf("No se detectó un iPad por USB. Dispositivos detectados por red: %d. Conecta y desbloquea el iPad, acepta Confiar y abre Relevo. Wi-Fi aún no está habilitado.", network), nil
+		return fmt.Sprintf("No se detectó un iPad por USB. Dispositivos detectados por red: %d. Conecta y desbloquea el iPad, acepta Confiar y abre Relevo. Wi-Fi se inicia seleccionándolo en la ventana principal con nuestro cliente Relevo.", network), nil
 	}
 	return fmt.Sprintf("Dispositivos USB detectados: %d. Dispositivos por red: %d. Para probar, abre nuestro cliente Relevo en el iPad e inicia el enlace USB. La detección no confirma que la app esté verificada o abierta.", usb, network), nil
 }

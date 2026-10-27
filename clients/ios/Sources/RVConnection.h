@@ -23,5 +23,7 @@
 - (void)sendTouch:(NSString *)phase x:(double)x y:(double)y;
 - (void)sendCamera:(NSData *)jpeg;
 - (void)start;
+// Outbound TLS 1.2 with a one-session certificate pin and pairing token.
+- (BOOL)startWiFiWithPairingURI:(NSString *)uri;
 - (void)stop;
 @end
