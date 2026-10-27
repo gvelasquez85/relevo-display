@@ -26,7 +26,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.3", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.4", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard, PrepareStop: func() error { return desktop.PrepareVirtualMonitorStop(context.Background(), nil) }})
 	if e != nil {
 		wintray.ShowError(e)
 	}

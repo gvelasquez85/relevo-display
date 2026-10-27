@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"relevo/internal/winvirtual"
@@ -130,6 +131,11 @@ func (b windowsDisplayBackend) Set(ctx context.Context, name string, m winvirtua
 	// successful Stop leaves the adapter installed but outside the desktop;
 	// its next activation must reconnect that source/target path explicitly.
 	if found.Mode.Attached != m.Attached {
+		if !m.Attached {
+			if err := winvirtual.EnsureSafeDetach(ctx, b); err != nil {
+				return err
+			}
+		}
 		if b.log != nil {
 			b.log(fmt.Sprintf("display membership via CCD: %s attached=%t -> %t", name, found.Mode.Attached, m.Attached))
 		}
@@ -213,17 +219,22 @@ func virtualCaptureMode(ctx context.Context, b windowsDisplayBackend, width, hei
 	}
 	name := ""
 	count := 0
+	otherAttached := false
+	var target winvirtual.Display
 	for _, d := range displays {
 		if isMTTVDD(d.HardwareID) {
-			if d.Primary {
-				return winvirtual.Mode{}, fmt.Errorf("refusing primary virtual display")
-			}
+			target = d
 			name = d.Name
 			count++
+		} else if d.Mode.Attached {
+			otherAttached = true
 		}
 	}
 	if count != 1 {
 		return winvirtual.Mode{}, fmt.Errorf("expected exactly one root\\mttvdd display; found %d", count)
+	}
+	if target.Mode.Attached && (target.Primary || !otherAttached) {
+		return target.Mode, nil
 	}
 	modes, err := advertisedDisplayModes(ctx, name)
 	if err != nil {
@@ -254,4 +265,71 @@ func advertisedDisplayModes(ctx context.Context, name string) ([]devModeW, error
 		modes = append(modes, dm)
 	}
 	return nil, fmt.Errorf("virtual display mode enumeration exceeded safety limit")
+}
+
+// RestoreOtherOutput is only called before detaching the sole virtual output.
+// CCD target availability establishes that a connected alternative exists; merely
+// finding a remembered GDI registry mode is not evidence of a physical monitor.
+func (b windowsDisplayBackend) RestoreOtherOutput(ctx context.Context) error {
+	ds, err := b.List(ctx)
+	if err != nil {
+		return err
+	}
+	candidates := map[string]bool{}
+	for _, d := range ds {
+		if !isMTTVDD(d.HardwareID) {
+			candidates[strings.ToLower(d.Name)] = true
+		}
+	}
+	paths, _, err := queryCCD(ctx)
+	if err != nil {
+		return err
+	}
+	available := false
+	for _, path := range paths {
+		if path.Target.Available == 0 {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		k := ccdKey(path)
+		name := ccdSourceName{Header: ccdDeviceHeader{Type: 1, Size: uint32(unsafe.Sizeof(ccdSourceName{})), Adapter: k.Adapter, ID: k.ID}}
+		status, _, _ := ccdDeviceInfo.Call(uintptr(unsafe.Pointer(&name)))
+		if status == 0 && candidates[strings.ToLower(syscall.UTF16ToString(name.Name[:]))] {
+			available = true
+			break
+		}
+	}
+	if !available {
+		return fmt.Errorf("no connected alternative display target is available")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Request the saved extended topology. Windows chooses valid timings and a
+	// primary; no paths/modes are fabricated and no registry defaults are changed.
+	status, _, _ := ccdSet.Call(0, 0, 0, 0, 0x4|0x80)
+	if b.log != nil {
+		b.log(fmt.Sprintf("restore alternative output before virtual detach: SetDisplayConfig extend status %d", status))
+	}
+	if status != 0 {
+		return fmt.Errorf("restore alternative display: SetDisplayConfig status %d", status)
+	}
+	for {
+		ds, err = b.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, d := range ds {
+			if !isMTTVDD(d.HardwareID) && d.Mode.Attached && d.Mode.Width > 0 && d.Mode.Height > 0 {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }

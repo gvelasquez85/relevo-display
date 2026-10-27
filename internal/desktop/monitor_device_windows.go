@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"relevo/internal/windriver"
+	"relevo/internal/winvirtual"
 	"syscall"
 )
 
@@ -17,5 +18,8 @@ func DisconnectVirtualMonitor(ctx context.Context, log func(string)) (err error)
 		return err
 	}
 	defer func() { err = errors.Join(err, syscall.CloseHandle(h)) }()
+	if err = winvirtual.EnsureSafeDetach(ctx, windowsDisplayBackend{log: log}); err != nil {
+		return err
+	}
 	return windriver.EnsureDeviceEnabled(ctx, false, log)
 }

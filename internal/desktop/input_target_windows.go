@@ -69,8 +69,8 @@ func InputTarget(source Source) (func() (wininput.Target, error), error) {
 			if e != nil {
 				return wininput.Target{}, e
 			}
-			if d.Mode != s.lease.Mode {
-				return wininput.Target{}, fmt.Errorf("capture topology changed")
+			if e := validateLiveCaptureMode(d.Mode); e != nil {
+				return wininput.Target{}, e
 			}
 			r = winRect{d.Mode.X, d.Mode.Y, d.Mode.X + d.Mode.Width, d.Mode.Y + d.Mode.Height}
 		}

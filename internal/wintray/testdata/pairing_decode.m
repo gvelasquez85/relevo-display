@@ -11,6 +11,8 @@ int main(void){@autoreleasepool {
  CGImageRef image=source?CGImageSourceCreateImageAtIndex(source,0,NULL):NULL;
  if(source)CFRelease(source);if(!image)return 3;
  VNDetectBarcodesRequest *request=[VNDetectBarcodesRequest new];request.symbologies=@[VNBarcodeSymbologyQR];
+ // Test pixels independently of the host GPU/display reconfiguration state.
+ request.usesCPUOnly=YES;
  VNImageRequestHandler *handler=[[VNImageRequestHandler alloc]initWithCGImage:image options:@{}];
  NSError *error=nil;BOOL ok=[handler performRequests:@[request] error:&error];CGImageRelease(image);
  if(!ok || error)return 4;

@@ -16,6 +16,7 @@ import (
 )
 
 type Options struct {
+	PrepareStop       func() error
 	OpenKeyboard      func() error
 	DisconnectMonitor func() error
 	OpenYamTests      func(Settings)
@@ -186,11 +187,19 @@ func Run(o Options) error {
 	var mu sync.Mutex
 	var result error
 	var progressText string
+	var stopGuard stopPreflight
+	var stopNotice string
+	type stopCheckResult struct {
+		token uint64
+		err   error
+	}
+	stopChecks := make(chan stopCheckResult, 1)
 	const callback = 0x8001
 	const finished = 0x8002
 	const installed = 0x8003
 	const progress = 0x8004
 	const disconnected = 0x8005
+	const stopPrepared = 0x8006
 	instance, _, _ := k.NewProc("GetModuleHandleW").Call(0)
 	hi := monitorIcon(instance)
 	if hi == 0 {
@@ -207,6 +216,9 @@ func Run(o Options) error {
 		}
 		if installing {
 			text = "Preparando controlador…"
+		}
+		if stopGuard.pending {
+			text = "Comprobando otra salida de pantalla antes de detener…"
 		}
 		if disconnecting {
 			text = "Desconectando dispositivo de pantalla… Windows puede solicitar permisos de administrador."
@@ -247,7 +259,7 @@ func Run(o Options) error {
 				mode = "desktop"
 			}
 		}
-		if !installing && !disconnecting && !closing && ((active && stop != nil) || (!active && mode == "extend" && o.DisconnectMonitor != nil)) {
+		if !installing && !disconnecting && !closing && !stopGuard.pending && ((active && stop != nil) || (!active && mode == "extend" && o.DisconnectMonitor != nil)) {
 			en = 1
 		}
 		call("EnableWindow", stopButton, en)
@@ -301,13 +313,37 @@ func Run(o Options) error {
 		s.NativeGestures = call("SendMessageW", nativeGesturesCheck, 0xf0, 0, 0) == 1
 		return s
 	}
+	requestStop := func(exit bool) {
+		if stop == nil {
+			return
+		}
+		stopNotice = ""
+		if settings.Mode != "extend" || o.PrepareStop == nil {
+			closing = closing || exit
+			close(stop)
+			stop = nil
+			update()
+			setText(status, "Deteniendo y restaurando la pantalla…")
+			return
+		}
+		token, start := stopGuard.begin(exit)
+		if !start {
+			return
+		}
+		update()
+		go func() {
+			err := o.PrepareStop()
+			stopChecks <- stopCheckResult{token, err}
+			call("PostMessageW", hwnd, stopPrepared, 0, 0)
+		}()
+	}
 	quit := func() {
+		if active && stop != nil {
+			requestStop(true)
+			return
+		}
 		if active || installing || disconnecting {
 			closing = true
-			if stop != nil {
-				close(stop)
-				stop = nil
-			}
 			update()
 			return
 		}
@@ -349,6 +385,8 @@ func Run(o Options) error {
 				return
 			}
 			active = true
+			stopGuard.newSession()
+			stopNotice = ""
 			stop = make(chan struct{})
 			ch := stop
 			s := settings
@@ -367,10 +405,7 @@ func Run(o Options) error {
 			}()
 		case 2:
 			if stop != nil {
-				close(stop)
-				stop = nil
-				setText(status, "Deteniendo y restaurando la pantalla…")
-				call("EnableWindow", stopButton, 0)
+				requestStop(false)
 				return
 			}
 			if active || installing || disconnecting || o.DisconnectMonitor == nil {
@@ -512,7 +547,7 @@ func Run(o Options) error {
 					text string
 				}{{7, "Abrir Relevo Display"}, {1, "Iniciar pantalla"}, {2, "Detener"}, {6, "Salir"}} {
 					flags := uintptr(0)
-					if item.id == 1 && (active || installing || disconnecting) || item.id == 2 && (installing || disconnecting || closing || (active && stop == nil) || (!active && (settings.Mode != "extend" || o.DisconnectMonitor == nil))) {
+					if item.id == 1 && (active || installing || disconnecting) || item.id == 2 && (installing || disconnecting || closing || stopGuard.pending || (active && stop == nil) || (!active && (settings.Mode != "extend" || o.DisconnectMonitor == nil))) {
 						flags = 1
 					}
 					call("AppendMenuW", menu, flags, item.id, uintptr(unsafe.Pointer(p(item.text))))
@@ -529,15 +564,37 @@ func Run(o Options) error {
 			mu.Lock()
 			text := progressText
 			mu.Unlock()
-			if active {
+			if active && !stopGuard.pending && stopNotice == "" {
 				setText(status, text)
 			}
+			return 0
+		case stopPrepared:
+			result := <-stopChecks
+			exit, valid := stopGuard.complete(result.token)
+			if !valid || !active || stop == nil {
+				return 0
+			}
+			if result.err != nil {
+				closing = false
+				update()
+				stopNotice = "Detener cancelado; la pantalla sigue activa.\r\n" + result.err.Error()
+				setText(status, stopNotice)
+				show()
+				return 0
+			}
+			closing = closing || exit
+			close(stop)
+			stop = nil
+			update()
+			setText(status, "Deteniendo y restaurando la pantalla…")
 			return 0
 		case finished, installed, disconnected:
 			mu.Lock()
 			e := result
 			mu.Unlock()
 			if m == finished {
+				closing = stopGuard.finishSession() || closing
+				stopNotice = ""
 				active = false
 				stop = nil
 			} else if m == installed {

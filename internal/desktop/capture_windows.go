@@ -50,6 +50,8 @@ type bitmapInfo struct {
 }
 type winSource struct {
 	recovery       captureRecovery
+	topologyUntil  time.Time
+	primary        bool
 	status         CaptureStatus
 	rect           winRect
 	width, height  int
@@ -99,7 +101,7 @@ func Open(ctx context.Context, opt Options) (source Source, result error) {
 			if !ready {
 				// A canceled start can finish enabling PnP before cancellation
 				// is observed. Complete its inverse before releasing ownership.
-				cleanupErr := windriver.EnsureDeviceEnabled(context.Background(), false, opt.Log)
+				cleanupErr := disableVirtualMonitorSafely(context.Background(), opt.Log)
 				result = errors.Join(result, cleanupErr, syscall.CloseHandle(handle))
 			}
 		}()
@@ -198,10 +200,12 @@ func (s *winSource) Next(ctx context.Context) ([]byte, error) {
 		return ok, e
 	}
 	frame, err := guardedCapture(ctx, available, func() ([]byte, error) { return s.captureFrame(ctx) }, s.paused)
+	transient := err != nil
+	frame, err = s.recovery.result(time.Now(), frame, err, s.paused)
 	if err == nil {
-		s.status.observe(unavailable)
+		s.status.observe(unavailable || transient)
 	}
-	return s.recovery.result(time.Now(), frame, err, s.paused)
+	return frame, err
 }
 
 func (s *winSource) captureFrame(ctx context.Context) (frame []byte, resultErr error) {
@@ -211,17 +215,30 @@ func (s *winSource) captureFrame(ctx context.Context) (frame []byte, resultErr e
 		if err != nil {
 			return nil, err
 		}
-		if d.Mode != s.lease.Mode {
-			return nil, fmt.Errorf("virtual display disappeared or changed; capture stopped")
+		if err := validateLiveCaptureMode(d.Mode); err != nil {
+			return nil, displayTransitionError{err}
 		}
-		s.rect = winRect{d.Mode.X, d.Mode.Y, d.Mode.X + d.Mode.Width, d.Mode.Y + d.Mode.Height}
+		liveRect := winRect{d.Mode.X, d.Mode.Y, d.Mode.X + d.Mode.Width, d.Mode.Y + d.Mode.Height}
+		if liveRect != s.rect || s.primary != d.Primary {
+			s.releaseCaptureResources()
+			s.topologyUntil = time.Now().Add(10 * time.Second)
+			s.rect = liveRect
+			s.primary = d.Primary
+			if s.log != nil {
+				s.log("virtual display topology changed; following live geometry and primary status")
+			}
+		}
 	}
 	defer func() {
 		if resultErr != nil {
 			s.releaseCaptureResources()
 		}
 		if resultErr != nil && ctx.Err() == nil {
-			resultErr = temporaryCaptureError{resultErr}
+			if time.Now().Before(s.topologyUntil) {
+				resultErr = displayTransitionError{resultErr}
+			} else {
+				resultErr = temporaryCaptureError{resultErr}
+			}
 		}
 	}()
 	dc, _, err := getDC.Call(0)
@@ -342,7 +359,7 @@ func (s *winSource) Close() error {
 	if s.lease != nil {
 		// Retire the dedicated PnP adapter, not only its desktop path.
 		// Camera, audio, microphone and input devices use separate adapters.
-		s.closeErr = windriver.EnsureDeviceEnabled(context.Background(), false, s.log)
+		s.closeErr = disableVirtualMonitorSafely(context.Background(), s.log)
 	}
 	if s.mutex != 0 {
 		s.closeErr = errors.Join(s.closeErr, syscall.CloseHandle(s.mutex))

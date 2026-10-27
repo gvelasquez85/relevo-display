@@ -53,11 +53,15 @@ func cursorPlacement(monitor, dest image.Rectangle, position, hotspot, size imag
 	return image.Rect(x, y, x+w, y+h), true
 }
 
-// Only GDI/cursor read failures qualify for a short transition grace. Identity,
-// topology and cancellation errors are never hidden by this recovery state.
+// Transient GDI and verified display reconfiguration failures get a bounded
+// grace while USB stays alive. Hardware-identity errors still fail immediately.
 type temporaryCaptureError struct{ error }
 
 func (e temporaryCaptureError) Unwrap() error { return e.error }
+
+type displayTransitionError struct{ error }
+
+func (e displayTransitionError) Unwrap() error { return e.error }
 
 type captureRecovery struct{ firstFailure time.Time }
 
@@ -67,13 +71,17 @@ func (r *captureRecovery) result(now time.Time, frame []byte, err error, paused 
 		return frame, nil
 	}
 	var native temporaryCaptureError
-	if !errors.As(err, &native) {
+	var transition displayTransitionError
+	grace := 2 * time.Second
+	if errors.As(err, &transition) {
+		grace = 10 * time.Second
+	} else if !errors.As(err, &native) {
 		return nil, err
 	}
 	if r.firstFailure.IsZero() {
 		r.firstFailure = now
 	}
-	if now.Sub(r.firstFailure) < 2*time.Second {
+	if now.Sub(r.firstFailure) < grace {
 		return paused, nil
 	}
 	return nil, err

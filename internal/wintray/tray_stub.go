@@ -5,6 +5,7 @@ package wintray
 import "fmt"
 
 type Options struct {
+	PrepareStop       func() error
 	OpenKeyboard      func() error
 	DisconnectMonitor func() error
 	OpenYamTests      func(Settings)

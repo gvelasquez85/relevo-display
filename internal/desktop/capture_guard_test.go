@@ -108,3 +108,21 @@ func TestCaptureRecoveryBoundsNativeFailuresAndResets(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCaptureRecoveryAllowsTemporaryDisplayTransition(t *testing.T) {
+	var recovery captureRecovery
+	start := time.Unix(100, 0)
+	transition := displayTransitionError{errors.New("display reconfiguring")}
+	for _, at := range []time.Duration{0, 3 * time.Second, 9 * time.Second} {
+		frame, err := recovery.result(start.Add(at), nil, transition, []byte("paused"))
+		if err != nil || string(frame) != "paused" {
+			t.Fatal("topology transition ended video", err)
+		}
+	}
+	if _, err := recovery.result(start.Add(11*time.Second), nil, transition, nil); err == nil {
+		t.Fatal("permanent disappearance hidden")
+	}
+	if _, err := recovery.result(start.Add(12*time.Second), []byte("ok"), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+}

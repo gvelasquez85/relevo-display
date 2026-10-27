@@ -47,15 +47,17 @@ type Lease struct {
 	mu                sync.Mutex
 	closed            bool
 	closeErr          error
+	preserve          bool
 }
 
-// Acquire attaches exactly one existing, nonprimary MTT virtual display to the
-// right of the physical desktop. It never installs a driver or changes counts.
+// Acquire leases exactly one verified MTT virtual display. Existing primary
+// or sole outputs are reused; otherwise it attaches beside the active desktop.
 func Acquire(ctx context.Context, b Backend, width, height int32) (*Lease, error) {
 	return AcquirePosition(ctx, b, width, height, "right")
 }
 
-// AcquirePosition attaches outside the selected edge of the active desktop.
+// AcquirePosition attaches outside the selected edge of the active desktop,
+// or at the origin when no other output is attached. A live primary is reused.
 // Empty position retains the historical right-hand placement.
 func AcquirePosition(ctx context.Context, b Backend, width, height int32, position string) (*Lease, error) {
 	if position == "" {
@@ -120,22 +122,37 @@ func AcquirePosition(ctx context.Context, b Backend, width, height int32, positi
 	if count != 1 {
 		return nil, fmt.Errorf("expected exactly one %s display; found %d", hardwareID, count)
 	}
-	if target.Primary {
-		return nil, errors.New("refusing to change the primary virtual display")
-	}
 	if target.Name == "" {
 		return nil, errors.New("virtual display has no path name")
 	}
-	if !physical {
-		return nil, errors.New("an attached physical display is required")
+	if target.Mode.Attached && (target.Primary || !physical) {
+		if target.Mode.Width <= 0 || target.Mode.Height <= 0 {
+			return nil, errors.New("active virtual display has invalid bounds")
+		}
+		current, err := lookup(ctx, b, target.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !current.Mode.Attached || current.Mode.Width <= 0 || current.Mode.Height <= 0 {
+			return nil, errors.New("virtual display became inactive before acquisition")
+		}
+		target = current
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return &Lease{DisplayName: target.Name, Mode: target.Mode, backend: b, name: target.Name, original: target.Mode, applied: target.Mode, preserve: true}, nil
 	}
 	x, y := edge, int64(anchor)
-	switch position {
-	case "left":
+	if !physical {
+		x, y = 0, 0
+	}
+	switch {
+	case !physical:
+	case position == "left":
 		x -= int64(width)
-	case "above":
+	case position == "above":
 		x, y = int64(anchor), edge-int64(height)
-	case "below":
+	case position == "below":
 		x, y = int64(anchor), edge
 	}
 	if x < math.MinInt32 || y < math.MinInt32 || x+int64(width) > math.MaxInt32 || y+int64(height) > math.MaxInt32 {
@@ -215,8 +232,8 @@ func waitMode(ctx context.Context, b Backend, name string, want Mode) error {
 		if err != nil {
 			return err
 		}
-		if d.Primary {
-			return errors.New("virtual display became primary")
+		if d.Primary && !want.Attached {
+			return errors.New("refusing to remove primary virtual display")
 		}
 		if d.Mode == want || !want.Attached && !d.Mode.Attached {
 			return nil
@@ -231,12 +248,16 @@ func waitMode(ctx context.Context, b Backend, name string, want Mode) error {
 
 // restore uses a fresh bounded context: a canceled acquisition still needs to
 // undo its own changes. It refuses to overwrite another process's settings.
-func (l *Lease) restore() error {
+func (l *Lease) restore() error { return l.restoreWithPolicy(false) }
+func (l *Lease) restoreWithPolicy(preserveExternal bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), activationTimeout)
 	defer cancel()
 	d, err := lookup(ctx, l.backend, l.name)
 	if err != nil {
 		return err
+	}
+	if l.preserve || preserveExternal && (d.Primary || d.Mode != l.applied) {
+		return nil
 	}
 	if d.Primary {
 		return errors.New("refusing to restore a display that became primary")
@@ -247,6 +268,11 @@ func (l *Lease) restore() error {
 	if d.Mode != l.applied {
 		return errors.New("virtual display settings changed externally; restoration skipped")
 	}
+	if !l.original.Attached {
+		if err := EnsureSafeDetach(ctx, l.backend); err != nil {
+			return err
+		}
+	}
 	if err = l.backend.Set(ctx, l.name, l.original); err != nil {
 		return fmt.Errorf("restore virtual display: %w", err)
 	}
@@ -256,7 +282,8 @@ func (l *Lease) restore() error {
 	return nil
 }
 
-// Close restores the original attached or detached state exactly once.
+// Close restores the original state exactly once while preserving externally
+// chosen topology (including primary promotion) rather than undoing user intent.
 func (l *Lease) Close() error {
 	if l == nil {
 		return nil
@@ -265,7 +292,7 @@ func (l *Lease) Close() error {
 	defer l.mu.Unlock()
 	if !l.closed {
 		l.closed = true
-		l.closeErr = l.restore()
+		l.closeErr = l.restoreWithPolicy(true)
 	}
 	return l.closeErr
 }
@@ -331,6 +358,11 @@ func (l *Lease) CloseDetached() error {
 	defer l.mu.Unlock()
 	if !l.closed {
 		l.closed = true
+		if err := EnsureSafeDetach(context.Background(), l.backend); err != nil {
+			l.closed = false
+			return err
+		}
+		l.preserve = false // Explicit retirement must not report a borrowed output as detached.
 		l.original.Attached = false
 		l.closeErr = l.restore()
 	}
