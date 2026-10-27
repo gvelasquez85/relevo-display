@@ -14,7 +14,11 @@ import (
 	"relevo/internal/wininput"
 )
 
-type Options struct{ Touch, Keyboard bool }
+type Options struct {
+	Touch, Keyboard bool
+	// Tap is called after a successful single tap; enqueue work without blocking.
+	Tap func(x, y float64)
+}
 type Stats struct{ Handled, Ignored, Errors uint64 }
 type panState struct {
 	active                     bool
@@ -260,7 +264,13 @@ func (c *Controller) handle(event map[string]interface{}, name string, t wininpu
 		if err := c.extended.HandleContacts([]remoteinput.Contact{{ID: 1, Phase: "down", X: x, Y: y}}); err != nil {
 			return true, err
 		}
-		return true, c.extended.HandleContacts([]remoteinput.Contact{{ID: 1, Phase: "up", X: x, Y: y}})
+		if err := c.extended.HandleContacts([]remoteinput.Contact{{ID: 1, Phase: "up", X: x, Y: y}}); err != nil {
+			return true, err
+		}
+		if c.options.Keyboard && c.options.Tap != nil {
+			c.options.Tap(x, y)
+		}
+		return true, nil
 	case "SingleTap2nd", "TwoFingerSingleTap":
 		if c.drag {
 			return true, fmt.Errorf("secondary click during active drag")

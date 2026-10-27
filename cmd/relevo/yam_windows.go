@@ -20,8 +20,8 @@ func openYamTests(base wintray.Settings) {
 	reportIntro := fmt.Sprintf("Usa Yam abierto por USB. Ajustes de la ventana principal: %s · %s · %s. Para cambiar resolución, posición o modo, vuelve a Relevo.", base.Resolution, base.Mode, base.Position)
 	err := wintray.RunLab(wintray.LabOptions{
 		Embedded: true, InputField: true, Profiles: wintray.YamProfiles(), Validate: wintray.ValidateYamSettings,
-		Title: "Relevo Display 0.15.0 · Pruebas con Yam", Intro: reportIntro,
-		Footer:      "Yam: touch de un contacto, gestos interpretados y teclado. Sin multitouch completo ni apertura automática del teclado. No se guarda texto.",
+		Title: "Relevo Display 0.15.1 · Pruebas con Yam", Intro: reportIntro,
+		Footer:      "Yam: touch, arrastre, scroll y zoom activos también en la pantalla normal. Teclado Relevo contextual en campos Edit/RichEdit; botón Abrir teclado para otros campos. No se guarda texto.",
 		ActionLabel: "Abrir solicitud UAC", ActionProfile: "uac", Action: requestUACProbe,
 		Check: func() (string, error) {
 			c := &usbmux.Client{}
@@ -51,7 +51,7 @@ func openYamTests(base wintray.Settings) {
 			case "uac":
 				report("Con vídeo activo, pulsa Abrir solicitud UAC. Aceptar o cancelar sólo cierra un proceso de prueba; no instala ni modifica nada. Comprueba si la imagen regresa. Si Windows no usa escritorio seguro, no se dará por observada esa transición.")
 			case "input":
-				report("Toca, arrastra, desplaza con dos dedos y prueba gestos/teclado si Yam los ofrece. Se cuentan eventos y tipos de campos, nunca texto ni coordenadas. Las opciones Touch/gestos y Teclado iPad de la ventana principal controlan la entrada en Windows. Arrastra esta ventana al monitor del iPad y toca el campo de prueba para escribir; UAC y aplicaciones elevadas pueden rechazar entrada.")
+				report("Toca, arrastra, desplaza con dos dedos y prueba zoom. El teclado Relevo se dibuja sobre la pantalla enviada al iPad. Se cuentan eventos y tipos de campos, nunca texto ni coordenadas. Las opciones Touch/gestos y Teclado iPad de la ventana principal controlan la entrada en Windows. Arrastra esta ventana al monitor del iPad y toca el campo de prueba para abrir el teclado y escribir; UAC y aplicaciones elevadas pueden rechazar entrada.")
 			case "display":
 				report("Comprueba proporción 4:3 y posición del monitor. El modo desktop muestra la pantalla principal en el iPad; no cambia Windows a clonación nativa.")
 			default:

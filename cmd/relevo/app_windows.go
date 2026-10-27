@@ -12,19 +12,22 @@ import (
 	"relevo/internal/appstate"
 	"relevo/internal/desktop"
 	"relevo/internal/nativeapp"
+	"relevo/internal/remoteinput"
 	"relevo/internal/session"
 	"relevo/internal/usbmux"
 	"relevo/internal/windriver"
+	"relevo/internal/winfocus"
 	"relevo/internal/wininput"
 	"relevo/internal/wintray"
 	"relevo/internal/yaminput"
+	"relevo/internal/yamkeyboard"
 	"strconv"
 	"strings"
 	"time"
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.0", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.1", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -183,6 +186,7 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 	// Input owns only contact/key state. Register after source cleanup so it
 	// releases held input before the display peripheral is removed (LIFO).
 	var input *yaminput.Controller
+	var keyboardPanel *yamkeyboard.Manager
 	if settings.Touch || settings.Keyboard {
 		target, inputErr := desktop.InputTarget(source)
 		if inputErr == nil {
@@ -190,7 +194,21 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 			extended, extendedErr := wininput.NativeExtendedBackend()
 			inputErr = errors.Join(mouseErr, extendedErr)
 			if inputErr == nil {
-				input, inputErr = yaminput.New(target, mouse, extended, yaminput.Options{Touch: settings.Touch, Keyboard: settings.Keyboard})
+				inputOptions := yaminput.Options{Touch: settings.Touch, Keyboard: settings.Keyboard}
+				if settings.Keyboard {
+					panelKeys := wininput.NewExtended(target, extended)
+					keyboardPanel = yamkeyboard.New(target, winfocus.Probe, func(t wininput.Target) (func(), error) {
+						return wintray.ShowKeyboardPanel(t, func(key remoteinput.Key) error { return panelKeys.HandleKey(key) })
+					}, report)
+					activeYamKeyboard.Store(keyboardPanel)
+					defer func() {
+						activeYamKeyboard.CompareAndSwap(keyboardPanel, nil)
+						keyboardPanel.Close()
+						_ = panelKeys.Close()
+					}()
+					inputOptions.Tap = keyboardPanel.Tap
+				}
+				input, inputErr = yaminput.New(target, mouse, extended, inputOptions)
 			}
 		}
 		if inputErr != nil {
@@ -209,8 +227,18 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 	var cancelInput func()
 	var receiveInput func(map[string]interface{}) error
 	if input != nil {
-		cancelInput = func() { _ = input.CancelActive() }
+		cancelInput = func() {
+			if keyboardPanel != nil {
+				keyboardPanel.Cancel()
+			}
+			_ = input.CancelActive()
+		}
 		receiveInput = func(event map[string]interface{}) error {
+			if keyboardPanel != nil {
+				if name, _ := event["eventName"].(string); name != "SingleTap" && name != "HoverEvent" {
+					keyboardPanel.Cancel()
+				}
+			}
 			before := input.Stats().Errors
 			_ = input.Handle(event)
 			if input.Stats().Errors > before && before == 0 {

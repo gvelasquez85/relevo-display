@@ -16,6 +16,7 @@ import (
 )
 
 type Options struct {
+	OpenKeyboard      func() error
 	DisconnectMonitor func() error
 	OpenYamTests      func(Settings)
 	OpenTests         func()
@@ -327,6 +328,12 @@ func Run(o Options) error {
 			return
 		}
 		switch id {
+		case 12:
+			if o.OpenKeyboard != nil {
+				if err := o.OpenKeyboard(); err != nil {
+					setText(status, err.Error())
+				}
+			}
 		case 1:
 			if active || installing || disconnecting || o.Start == nil {
 				return
@@ -633,7 +640,7 @@ func Run(o Options) error {
 	}
 	saveButton = child("BUTTON", "Guardar ajustes", 0x10000, 24, 264, 180, 32, 8)
 	touchCheck = child("BUTTON", "Touch/gestos", 0x10003, 220, 264, 130, 32, 26)
-	keyboardCheck = child("BUTTON", "Teclado iPad", 0x10003, 370, 264, 140, 32, 27)
+	keyboardCheck = child("BUTTON", "Teclado Relevo", 0x10003, 370, 264, 140, 32, 27)
 	if settings.Touch {
 		call("SendMessageW", touchCheck, 0xf1, 1, 0)
 	}
@@ -671,6 +678,7 @@ func Run(o Options) error {
 	testsButton = child("BUTTON", "Pruebas y nuevas funciones", 0x10000, 24, 470, 270, 34, 9)
 	child("BUTTON", "Exportar diagnóstico", 0x10000, 308, 470, 202, 34, 10)
 	yamTestsButton = child("BUTTON", "Pruebas con Yam", 0x10000, 24, 514, 270, 34, 11)
+	child("BUTTON", "Abrir teclado", 0x10000, 308, 514, 202, 34, 12)
 	child("STATIC", "Cerrar la ventana mantiene el icono junto al reloj. Para cerrar: icono → Salir.", 0, 24, 562, 490, 32, 0)
 	icon = nid{H: hwnd, ID: 1, Flags: 7, Callback: callback, Icon: hi}
 	icon.Size = uint32(unsafe.Sizeof(icon))
