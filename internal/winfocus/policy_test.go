@@ -25,3 +25,26 @@ func TestEditablePolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestAutomationEditablePolicy(t *testing.T) {
+	good := automationMetadata{50004, true, true, true, true, false, true, true}
+	if !automationEditable(good) {
+		t.Fatal("browser edit rejected")
+	}
+	for _, mutate := range []func(*automationMetadata){
+		func(m *automationMetadata) { m.controlType = 50030 }, // whole document must never qualify
+		func(m *automationMetadata) { m.enabled = false },
+		func(m *automationMetadata) { m.focused = false },
+		func(m *automationMetadata) { m.focusable = false },
+		func(m *automationMetadata) { m.readOnlyKnown = false },
+		func(m *automationMetadata) { m.readOnly = true },
+		func(m *automationMetadata) { m.active = false },
+		func(m *automationMetadata) { m.hitFocused = false },
+	} {
+		m := good
+		mutate(&m)
+		if automationEditable(m) {
+			t.Fatalf("unsafe metadata accepted: %+v", m)
+		}
+	}
+}

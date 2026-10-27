@@ -16,6 +16,8 @@ import (
 
 type Options struct {
 	Touch, Keyboard bool
+	// NativeGestures reconstructs two synthetic contacts from confirmed aggregate gestures.
+	NativeGestures bool
 	// Tap is called after a successful single tap; enqueue work without blocking.
 	Tap func(x, y float64)
 }
@@ -43,6 +45,7 @@ type Controller struct {
 	lastX, lastY                                float64
 	pans                                        map[string]panState
 	zoom                                        zoomState
+	native                                      nativeGesture
 }
 type inputCleanupError struct{ cause error }
 
@@ -76,6 +79,9 @@ func (c *Controller) maintainMouseRelease() {
 			return
 		case <-timer.C:
 			c.mu.Lock()
+			if !c.closed && c.native.kind != "" && time.Since(c.native.updated) > 2*time.Second {
+				c.fail()
+			}
 			if !c.closed && c.broken && c.rightHeld {
 				if c.mouse.Send(wininput.Packet{RightUp: true}) == nil {
 					c.rightHeld = false
@@ -112,6 +118,7 @@ func (c *Controller) release(final bool) error {
 		c.haveTarget = false
 		c.pans = map[string]panState{}
 		c.zoom = zoomState{}
+		c.native = nativeGesture{}
 	}
 	return err
 }
@@ -221,6 +228,14 @@ func (c *Controller) handle(event map[string]interface{}, name string, t wininpu
 			}
 		}
 		return true, nil
+	}
+	if c.options.NativeGestures {
+		if name == "TwoFingerPanned" || name == "Zoomed" {
+			return c.nativeEvent(event, name, t)
+		}
+		if c.native.kind != "" {
+			return true, fmt.Errorf("pointer event during native gesture")
+		}
 	}
 	switch name {
 	case "Scrolled", "TwoFingerPanned":

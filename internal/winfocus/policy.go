@@ -19,3 +19,13 @@ func editable(m metadata) bool {
 	}
 	return false
 }
+
+// automationMetadata contains only interaction metadata, never field contents.
+type automationMetadata struct {
+	controlType                                                              int32
+	enabled, focused, focusable, readOnlyKnown, readOnly, active, hitFocused bool
+}
+
+func automationEditable(m automationMetadata) bool {
+	return m.controlType == 50004 && m.enabled && m.focused && m.focusable && m.readOnlyKnown && !m.readOnly && m.active && m.hitFocused
+}

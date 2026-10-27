@@ -12,7 +12,6 @@ import (
 	"relevo/internal/appstate"
 	"relevo/internal/desktop"
 	"relevo/internal/nativeapp"
-	"relevo/internal/remoteinput"
 	"relevo/internal/session"
 	"relevo/internal/usbmux"
 	"relevo/internal/windriver"
@@ -27,7 +26,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.1", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.2", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -194,17 +193,15 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 			extended, extendedErr := wininput.NativeExtendedBackend()
 			inputErr = errors.Join(mouseErr, extendedErr)
 			if inputErr == nil {
-				inputOptions := yaminput.Options{Touch: settings.Touch, Keyboard: settings.Keyboard}
+				inputOptions := yaminput.Options{Touch: settings.Touch, Keyboard: settings.Keyboard, NativeGestures: settings.NativeGestures}
 				if settings.Keyboard {
-					panelKeys := wininput.NewExtended(target, extended)
-					keyboardPanel = yamkeyboard.New(target, winfocus.Probe, func(t wininput.Target) (func(), error) {
-						return wintray.ShowKeyboardPanel(t, func(key remoteinput.Key) error { return panelKeys.HandleKey(key) })
-					}, report)
+					keyboardPanel = yamkeyboard.NewWithContext(target, winfocus.ProbeEditable, func(ctx context.Context, t wininput.Target) (func(), error) {
+						return wintray.ShowSystemKeyboardContext(ctx, t)
+					}, report, wintray.SystemKeyboardVisible)
 					activeYamKeyboard.Store(keyboardPanel)
 					defer func() {
 						activeYamKeyboard.CompareAndSwap(keyboardPanel, nil)
 						keyboardPanel.Close()
-						_ = panelKeys.Close()
 					}()
 					inputOptions.Tap = keyboardPanel.Tap
 				}
@@ -215,7 +212,7 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 			log(fmt.Sprintf("remote input initialization unavailable: %v; video continues (no event values)", inputErr))
 		} else {
 			inputAvailable = true
-			log(fmt.Sprintf("remote input enabled: touch=%t keyboard=%t; single-contact touch and interpreted gestures", settings.Touch, settings.Keyboard))
+			log(fmt.Sprintf("remote input enabled: touch=%t keyboard=%t native_gestures=%t; native gestures reconstruct two contacts from aggregate events", settings.Touch, settings.Keyboard, settings.NativeGestures))
 			defer func() {
 				if input.Close() != nil {
 					log("remote input release failed; display cleanup will continue")
@@ -272,6 +269,9 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 		if input != nil {
 			inputStats = input.Stats()
 			extra = fmt.Sprintf("\nEntrada: %d procesados · %d omitidos · %d errores", inputStats.Handled, inputStats.Ignored, inputStats.Errors)
+			if settings.NativeGestures {
+				extra += " · gestos Windows de dos dedos"
+			}
 		} else if settings.Touch || settings.Keyboard {
 			extra = "\nEntrada no disponible; vídeo activo."
 		}

@@ -24,3 +24,16 @@ func TestConnectionSettingsKeepWorkingDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestNativeGesturePreferenceRoundTrip(t *testing.T) {
+	p := t.TempDir() + "/settings.json"
+	s := DefaultSettings()
+	s.NativeGestures = true
+	if err := saveSettings(p, s); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadSettings(p)
+	if err != nil || !loaded.NativeGestures {
+		t.Fatal("native gesture choice not persisted", err)
+	}
+}

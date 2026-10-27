@@ -13,7 +13,7 @@ var activeYamKeyboard atomic.Pointer[yamkeyboard.Manager]
 func openYamKeyboard() error {
 	m := activeYamKeyboard.Load()
 	if m == nil {
-		return fmt.Errorf("inicia la pantalla con Yam por USB y habilita Teclado Relevo; después vuelve a pulsar Abrir teclado")
+		return fmt.Errorf("inicia la pantalla con Yam por USB y habilita Teclado Windows; después vuelve a pulsar Abrir teclado")
 	}
 	m.Manual()
 	return nil

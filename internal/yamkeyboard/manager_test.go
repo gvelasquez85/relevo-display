@@ -1,6 +1,7 @@
 package yamkeyboard
 
 import (
+	"context"
 	"image"
 	"relevo/internal/wininput"
 	"sync/atomic"
@@ -52,5 +53,40 @@ func TestCancelInvalidatesPendingTap(t *testing.T) {
 	m.Close()
 	if calls.Load() != 0 {
 		t.Fatal("cancelled tap queried focus")
+	}
+}
+
+func TestOpenKeyboardIsNotRelaunchedForNextField(t *testing.T) {
+	var shown, closed atomic.Int32
+	m := New(func() (wininput.Target, error) { return wininput.Target{Screen: image.Rect(0, 0, 1024, 768)}, nil }, nil, func(wininput.Target) (func(), error) { shown.Add(1); return func() { closed.Add(1) }, nil }, nil, func() bool { return shown.Load() > 0 })
+	m.Manual()
+	time.Sleep(40 * time.Millisecond)
+	m.Manual()
+	time.Sleep(40 * time.Millisecond)
+	m.Close()
+	if shown.Load() != 1 || closed.Load() != 1 {
+		t.Fatal("keyboard relaunched while visible", shown.Load(), closed.Load())
+	}
+}
+
+func TestCloseCancelsKeyboardStartup(t *testing.T) {
+	started := make(chan struct{})
+	m := NewWithContext(func() (wininput.Target, error) { return wininput.Target{Screen: image.Rect(0, 0, 1024, 768)}, nil }, nil, func(ctx context.Context, _ wininput.Target) (func(), error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}, nil)
+	m.Manual()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("startup absent")
+	}
+	done := make(chan struct{})
+	go func() { m.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("stop blocked on keyboard startup")
 	}
 }

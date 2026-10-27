@@ -24,7 +24,7 @@ import (
 	"relevo/internal/wintray"
 )
 
-const version = "0.15.1-experimental"
+const version = "0.15.2-experimental"
 
 func closeCapture(source desktop.Source, prior error) error {
 	if source == nil {

@@ -179,7 +179,7 @@ func Run(o Options) error {
 	defer syscall.CloseHandle(syscall.Handle(singleton))
 	settings, loadErr := LoadSettings()
 	var hwnd, status, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, touchCheck, keyboardCheck, startButton, stopButton, installButton, saveButton, testsButton, yamTestsButton uintptr
-	var clientCombo, transportCombo, lanCombo uintptr
+	var clientCombo, transportCombo, lanCombo, nativeGesturesCheck uintptr
 	var lanAddresses = lantransport.Addresses()
 	var active, installing, disconnecting, closing, testsOpen bool
 	var stop chan struct{}
@@ -216,7 +216,7 @@ func Run(o Options) error {
 		if active || installing || disconnecting {
 			enabled = 0
 		}
-		for _, h := range []uintptr{startButton, installButton, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, touchCheck, keyboardCheck, saveButton, testsButton, yamTestsButton, clientCombo, transportCombo, lanCombo} {
+		for _, h := range []uintptr{startButton, installButton, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, touchCheck, keyboardCheck, saveButton, testsButton, yamTestsButton, clientCombo, transportCombo, lanCombo, nativeGesturesCheck} {
 			call("EnableWindow", h, enabled)
 		}
 		if enabled != 0 {
@@ -224,7 +224,11 @@ func Run(o Options) error {
 			transportEnabled := uintptr(0)
 			if clientIndex == 1 {
 				transportEnabled = 1
+				setText(keyboardCheck, "Teclado iPad")
+			} else {
+				setText(keyboardCheck, "Teclado Windows")
 			}
+			call("EnableWindow", nativeGesturesCheck, 1-transportEnabled)
 			call("EnableWindow", transportCombo, transportEnabled)
 			lanEnabled := uintptr(0)
 			if clientIndex == 1 && call("SendMessageW", transportCombo, 0x147, 0, 0) == 1 {
@@ -294,6 +298,7 @@ func Run(o Options) error {
 		}
 		s.Touch = call("SendMessageW", touchCheck, 0xf0, 0, 0) == 1
 		s.Keyboard = call("SendMessageW", keyboardCheck, 0xf0, 0, 0) == 1
+		s.NativeGestures = call("SendMessageW", nativeGesturesCheck, 0xf0, 0, 0) == 1
 		return s
 	}
 	quit := func() {
@@ -640,7 +645,7 @@ func Run(o Options) error {
 	}
 	saveButton = child("BUTTON", "Guardar ajustes", 0x10000, 24, 264, 180, 32, 8)
 	touchCheck = child("BUTTON", "Touch/gestos", 0x10003, 220, 264, 130, 32, 26)
-	keyboardCheck = child("BUTTON", "Teclado Relevo", 0x10003, 370, 264, 140, 32, 27)
+	keyboardCheck = child("BUTTON", "Teclado Windows", 0x10003, 370, 264, 140, 32, 27)
 	if settings.Touch {
 		call("SendMessageW", touchCheck, 0xf1, 1, 0)
 	}
@@ -669,6 +674,10 @@ func Run(o Options) error {
 	fill(clientCombo, []string{"Yam (actual)", "Relevo (app propia)"}, ci)
 	fill(transportCombo, []string{"USB", "Wi-Fi (QR)"}, ti)
 	fill(lanCombo, lanAddresses, li)
+	nativeGesturesCheck = childAt("BUTTON", "Gestos de Windows (dos dedos)", 0x10003, 24, 356, 486, 26, 31)
+	if settings.NativeGestures {
+		call("SendMessageW", nativeGesturesCheck, 0xf1, 1, 0)
+	}
 	startButton = child("BUTTON", "Iniciar pantalla", 0x10001, 24, 315, 180, 38, 1)
 	stopButton = child("BUTTON", "Detener", 0x10000, 220, 315, 130, 38, 2)
 	status = child("EDIT", "", 0x200000|0x4|0x40|0x800, 24, 371, 486, 42, 0) // Scrollable, read-only error/progress text; never a modal session error.

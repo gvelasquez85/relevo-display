@@ -11,17 +11,18 @@ import (
 )
 
 type Settings struct {
-	Client     string `json:"client,omitempty"`
-	Transport  string `json:"transport,omitempty"`
-	LANAddress string `json:"lan_address,omitempty"`
-	Touch      bool   `json:"touch"`
-	Keyboard   bool   `json:"keyboard"`
-	Mode       string `json:"mode"`
-	Position   string `json:"position"`
-	KeepAwake  bool   `json:"keep_awake"`
-	Resolution string `json:"resolution"`
-	FPS        int    `json:"fps"`
-	Quality    int    `json:"quality"`
+	Client         string `json:"client,omitempty"`
+	Transport      string `json:"transport,omitempty"`
+	LANAddress     string `json:"lan_address,omitempty"`
+	NativeGestures bool   `json:"native_gestures,omitempty"`
+	Touch          bool   `json:"touch"`
+	Keyboard       bool   `json:"keyboard"`
+	Mode           string `json:"mode"`
+	Position       string `json:"position"`
+	KeepAwake      bool   `json:"keep_awake"`
+	Resolution     string `json:"resolution"`
+	FPS            int    `json:"fps"`
+	Quality        int    `json:"quality"`
 }
 
 var FrameRates = []int{10, 15, 20, 30, 60}
