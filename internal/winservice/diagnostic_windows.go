@@ -28,8 +28,14 @@ func consoleStateLabel(state string) string {
 		return "Acceso del iPad: transmisión activa"
 	case "desktop_unavailable":
 		return "Acceso del iPad: escritorio de acceso no disponible"
+	case "user_agent_starting":
+		return "Sesión iniciada: iniciando Relevo con el usuario"
+	case "user_agent_started":
+		return "Agente de usuario iniciado; conexión del iPad en curso"
+	case "user_agent_error":
+		return "Windows rechazó el agente de usuario; reintentando"
 	case "waiting_login":
-		return "Sesión iniciada: control transferido al agente de usuario"
+		return "Sesión iniciada: preparando el agente de usuario"
 	case "usb_error":
 		return "Acceso del iPad: conexión USB no disponible"
 	case "capture_error":

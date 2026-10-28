@@ -7,7 +7,7 @@ Reutiliza iPads antiguos como pantallas de computador. El equipo de referencia e
 | Componente | Estado actual |
 | --- | --- |
 | Windows, pantalla compatible | Funciona con la app Yam Display ya instalada en el iPad. El usuario confirmó imagen y mejor fluidez, con unos 45–50 FPS enviados; no es una medición de latencia ni de cuadros presentados. |
-| Windows, entrega actual | **0.16.0 experimental**, un instalador/GUI único con instalación, actualización, reparación, desinstalación, pruebas y diagnóstico. Servicio de arranque y captura previa al acceso implementados; validación física de instalación y acceso pendiente. |
+| Windows, entrega actual | **0.16.1 experimental**, un instalador/GUI único con instalación, actualización, reparación, desinstalación, pruebas y diagnóstico. El usuario confirmó imagen del acceso con 0.16.0; la transferencia tras introducir la contraseña falló. 0.16.1 inicia el agente desde el servicio y tolera la preparación del escritorio; esa corrección requiere validación física. |
 | Cliente iOS propio | UIKit/Objective-C, ARMv7, mínimo iOS 9.3.5. La versión 0.15.0 está compilada y empaquetada sin firma. Una versión anterior fue firmada e instalada, pero el iPad rechazó la verificación de Apple; la ejecución del cliente propio sigue pendiente de validación. |
 | Touch y teclado propios | Multitouch hasta 10 contactos, teclado Unicode/atajos, apertura tras un toque en un campo nativo editable, modo teclado y trackpad manuales. Compilado ARMv7; prueba física pendiente por verificación Apple. |
 | Cámara y audio propios | Código y pruebas automatizadas disponibles; ejecución física pendiente con el cliente propio. |
@@ -38,8 +38,11 @@ El servicio prepara el adaptador sin exigir otra pantalla y supervisa un proceso
 limitado a WinSta0\Winlogon en la consola, sólo antes de que exista una sesión de
 usuario. Verifica el propietario del transporte USB local de Apple, enlaza los
 hilos de captura/entrada al escritorio de acceso y los retira al iniciar sesión.
-La imagen e interacción de acceso mediante GDI requieren comprobación física en
-Windows. Esta primera ruta no cubre desbloquear una cuenta ya iniciada ni envía
+El usuario confirmó imagen de acceso mediante GDI en Windows con 0.16.0. La
+continuidad después de introducir la contraseña falló: 0.16.1 inicia el agente
+con el token filtrado y el entorno del usuario, una vez cargado su perfil; también
+reintenta la preparación del escritorio y no depende del icono de Explorer. Esa
+transferencia sigue pendiente de comprobación física. Esta primera ruta no cubre desbloquear una cuenta ya iniciada ni envía
 Ctrl+Alt+Del o cambia sus políticas. Las credenciales no se guardan ni aparecen en
 los diagnósticos. El GUI muestra estado del servicio y el resultado de transmisión
 previa al acceso. El transporte USB reutiliza el componente Apple ya instalado;

@@ -17,10 +17,14 @@ func autoConnect(stop <-chan struct{}, report func(string), run func() error, de
 		default:
 		}
 		err := run()
-		if err != nil && !errors.Is(err, ErrWaitingForDevice) {
+		if err != nil && !errors.Is(err, ErrWaitingForDevice) && !errors.Is(err, errWaitingForDesktop) {
 			return err
 		}
-		report("Esperando el iPad por USB… Abre la app compatible; se conectará automáticamente.")
+		if errors.Is(err, errWaitingForDesktop) {
+			report("Esperando el escritorio de usuario…\n" + err.Error())
+		} else {
+			report("Esperando el iPad por USB… Abre la app compatible; se conectará automáticamente.")
+		}
 		timer := time.NewTimer(delay)
 		select {
 		case <-stop:

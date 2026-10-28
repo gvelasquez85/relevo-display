@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 const consoleHandoffEvent = `Global\RelevoDisplayConsoleHandoff`
@@ -227,6 +228,111 @@ func launchConsoleChild(token windows.Token, session uint32, executable string) 
 	return &consoleChild{process: process.Process, session: session}, nil
 }
 
+// launchStandardUserAgent uses the actual console user's primary token. The
+// SYSTEM service never launches the ordinary GUI with its own privileged token.
+func launchStandardUserAgent(session uint32, executable string) error {
+	if err := validateInstalledExecutable(executable); err != nil {
+		return err
+	}
+	if session == 0 || session == 0xffffffff || session != windows.WTSGetActiveConsoleSessionId() {
+		return errors.New("consola de usuario no disponible")
+	}
+	var token windows.Token
+	if err := windows.WTSQueryUserToken(session, &token); err != nil {
+		return err
+	}
+	defer token.Close()
+	// A console token can be a full UAC administrator token. Prefer its linked
+	// filtered token so the ordinary GUI never inherits unnecessary elevation.
+	// ElevationTypeDefault represents the user's actual non-split policy; do
+	// not change Windows UAC policy or manufacture another account's token.
+	var elevationType, size uint32
+	if err := windows.GetTokenInformation(token, windows.TokenElevationType, (*byte)(unsafe.Pointer(&elevationType)), 4, &size); err != nil {
+		return err
+	}
+	if size != 4 || elevationType < 1 || elevationType > 3 {
+		return errors.New("tipo de token de usuario no reconocido")
+	}
+	if elevationType == 2 { // TokenElevationTypeFull
+		linked, err := token.GetLinkedToken()
+		if err != nil {
+			return err
+		}
+		defer linked.Close()
+		var elevated uint32
+		if err = windows.GetTokenInformation(linked, windows.TokenElevation, (*byte)(unsafe.Pointer(&elevated)), 4, &size); err != nil {
+			return err
+		}
+		if size != 4 || elevated != 0 {
+			return errors.New("el agente requiere el token UAC filtrado")
+		}
+		originalUser, err := token.GetTokenUser()
+		if err != nil {
+			return err
+		}
+		linkedUser, err := linked.GetTokenUser()
+		if err != nil {
+			return err
+		}
+		if !originalUser.User.Sid.Equals(linkedUser.User.Sid) {
+			return errors.New("el token filtrado pertenece a otro usuario")
+		}
+		token = linked
+	}
+	user, err := token.GetTokenUser()
+	if err != nil {
+		return err
+	}
+	if user.User.Sid.IsWellKnown(windows.WinLocalSystemSid) {
+		return errors.New("el agente de usuario no acepta un token LocalSystem")
+	}
+	// The console token can precede Userinit's profile load. Building an
+	// environment at that point can pick the SYSTEM/default profile and hide
+	// startup settings/USB diagnostics from the actual user. Wait; never race
+	// Userinit by calling LoadUserProfile here.
+	profile, profileErr := registry.OpenKey(registry.USERS, user.User.Sid.String(), registry.QUERY_VALUE)
+	if profileErr != nil {
+		return errors.New("perfil de usuario aún no disponible")
+	}
+	profile.Close()
+	actual, err := tokenSession(token)
+	if err != nil {
+		return err
+	}
+	if actual != session {
+		return errors.New("la sesión del agente cambió")
+	}
+	var env *uint16
+	if err = windows.CreateEnvironmentBlock(&env, token, false); err != nil {
+		return err
+	}
+	defer windows.DestroyEnvironmentBlock(env)
+	// Recheck after environment construction. A failed query is never permission
+	// to launch into an unknown or newly logged-off console.
+	absent, err := noConsoleUser(session)
+	if err != nil {
+		return err
+	}
+	if absent || session != windows.WTSGetActiveConsoleSessionId() {
+		return errors.New("la consola cerró la sesión")
+	}
+	app, _ := windows.UTF16PtrFromString(executable)
+	command, _ := windows.UTF16FromString(`"` + executable + `" --startup`)
+	desktop, _ := windows.UTF16PtrFromString(`WinSta0\Default`)
+	directory, _ := windows.UTF16PtrFromString(filepath.Dir(executable))
+	startup := windows.StartupInfo{Desktop: desktop}
+	startup.Cb = uint32(unsafe.Sizeof(startup))
+	var process windows.ProcessInformation
+	if err = windows.CreateProcessAsUser(token, app, &command[0], nil, nil, false, windows.CREATE_UNICODE_ENVIRONMENT|windows.CREATE_NO_WINDOW, env, directory, &startup, &process); err != nil {
+		return err
+	}
+	// This process belongs to the signed-in user. The service neither kills it on
+	// stop nor restarts it after Exit; the GUI's singleton coalesces HKLM Run.
+	windows.CloseHandle(process.Thread)
+	windows.CloseHandle(process.Process)
+	return nil
+}
+
 // SuperviseConsole launches only this protected executable on Winlogon's
 // console desktop while no user token exists. It never opens a listener or
 // accepts commands; sign-in immediately hands control back to the user agent.
@@ -292,6 +398,7 @@ func SuperviseConsole(ctx context.Context) error {
 	tick := time.NewTicker(500 * time.Millisecond)
 	defer tick.Stop()
 	var nextLaunch time.Time
+	var userAgent userAgentLaunch
 	for {
 		select {
 		case <-ctx.Done():
@@ -310,8 +417,6 @@ func SuperviseConsole(ctx context.Context) error {
 		if child == nil && !absent {
 			if session == 0 || session == 0xffffffff || tokenQueryErr != nil {
 				reportConsoleError("session_transition", tokenQueryErr)
-			} else {
-				writeConsoleState("waiting_login", 0)
 			}
 		}
 		if child != nil {
@@ -328,6 +433,19 @@ func SuperviseConsole(ctx context.Context) error {
 				}
 				child = nil
 				nextLaunch = time.Now().Add(2 * time.Second)
+			}
+		}
+		// Complete secure-worker shutdown before handing USB/capture to a
+		// freshly created standard-user GUI. HKLM Run alone can be delayed or
+		// disabled by Windows startup processing and is not a handoff guarantee.
+		if child == nil && userAgent.due(session, absent, tokenQueryErr, time.Now()) {
+			writeConsoleState("user_agent_starting", 0)
+			launchErr := launchStandardUserAgent(session, executable)
+			userAgent.result(launchErr, time.Now())
+			if launchErr != nil {
+				reportConsoleError("user_agent_error", launchErr)
+			} else {
+				writeConsoleState("user_agent_started", 0)
 			}
 		}
 		if absent && child == nil && !time.Now().Before(nextLaunch) {

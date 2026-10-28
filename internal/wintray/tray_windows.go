@@ -178,11 +178,19 @@ func Run(o Options) error {
 		return startupErr
 	}
 	if existing {
+		// A service/HKLM startup launch may meet an already open, idle shell.
+		// A successful duplicate launch must still request the intended session.
+		if o.ManagedStartup && IsStartupLaunch() {
+			api := windowsSingletonAPI{}
+			if window, err := api.window(); err == nil && window.main != 0 {
+				return api.command(window.main, 1)
+			}
+		}
 		return nil
 	}
 	defer syscall.CloseHandle(syscall.Handle(singleton))
 	settings, loadErr := LoadSettings()
-	if o.ManagedStartup && loadErr == nil {
+	if o.ManagedStartup {
 		settings.AutoStart = false
 		settings.Mode = "extend"
 		settings.Client = ""
@@ -391,8 +399,13 @@ func Run(o Options) error {
 			}
 			settings = read()
 			if e := SaveSettings(settings); e != nil {
-				message(hwnd, e.Error())
-				return
+				if !o.ManagedStartup {
+					message(hwnd, e.Error())
+					return
+				}
+				// A temporarily unavailable profile must not leave the sole iPad black
+				// behind a modal dialog before the first frame can be sent.
+				setText(status, "No se pudieron guardar los ajustes; iniciando con los valores actuales. "+e.Error())
 			}
 			active = true
 			stopGuard.newSession()
@@ -410,7 +423,8 @@ func Run(o Options) error {
 				}
 				var e error
 				if s.AutoStart || (o.ManagedStartup && s.Mode == "extend" && s.Receiver() == "yam" && s.Link() == "USB") {
-					e = autoConnect(ch, report, func() error { return o.Start(s, ch, report) }, 2*time.Second)
+					started := time.Now()
+					e = autoConnect(ch, report, func() error { return startupAttempt(o.Start(s, ch, report), o.ManagedStartup, started, time.Now()) }, 2*time.Second)
 				} else {
 					e = o.Start(s, ch, report)
 				}
@@ -803,17 +817,24 @@ func Run(o Options) error {
 	icon.Size = uint32(unsafe.Sizeof(icon))
 	copy(icon.Tip[:], syscall.StringToUTF16(o.Title))
 	r, _, _ := shell.NewProc("Shell_NotifyIconW").Call(0, uintptr(unsafe.Pointer(&icon)))
-	if r == 0 {
+	if r == 0 && !o.ManagedStartup {
 		call("DestroyWindow", hwnd)
 		return fmt.Errorf("Windows no pudo crear el icono de notificaciones")
 	}
+	// The service can start the user agent before Explorer creates its tray.
+	// Capture must start anyway. TaskbarCreated will register the icon later.
 	update()
 	call("ShowWindow", hwnd, 1)
 	call("UpdateWindow", hwnd)
 	if loadErr != nil {
-		message(hwnd, "No se pudo leer la configuración guardada. Se usan valores predeterminados.\n"+loadErr.Error())
+		text := "No se pudo leer la configuración guardada. Se usan valores predeterminados.\n" + loadErr.Error()
+		if o.ManagedStartup {
+			setText(status, text)
+		} else {
+			message(hwnd, text)
+		}
 	}
-	if loadErr == nil && (settings.AutoStart || o.ManagedStartup) && IsStartupLaunch() {
+	if (o.ManagedStartup || loadErr == nil && settings.AutoStart) && IsStartupLaunch() {
 		call("PostMessageW", hwnd, 0x111, 1, 0)
 	}
 	var m msg
