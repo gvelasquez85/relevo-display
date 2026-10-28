@@ -83,7 +83,7 @@ func TestDecoderErrorIsFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	st, e := Run(ctx, h, Options{Duration: time.Second, FPS: 2})
-	if e == nil || st.DecoderErrors != 1 {
+	if e == nil || st.DecoderErrors != 1 || ShouldReconnect(st) {
 		t.Fatal(st, e)
 	}
 }
@@ -93,7 +93,7 @@ func TestHandshakeHasIndependentDeadline(t *testing.T) {
 	defer p.Close()
 	started := time.Now()
 	st, e := Run(context.Background(), h, Options{Duration: 5 * time.Minute, FPS: 2, HandshakeTimeout: 30 * time.Millisecond})
-	if e == nil || st.FramesSent != 0 || time.Since(started) > time.Second {
+	if e == nil || st.FramesSent != 0 || time.Since(started) > time.Second || st.EndReason != EndHandshakeTimeout || !ShouldReconnect(st) {
 		t.Fatal(st, e, time.Since(started))
 	}
 }

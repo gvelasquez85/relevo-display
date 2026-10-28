@@ -362,7 +362,13 @@ func (s *winSource) reportEncoder(name string, fallback error) {
 	}
 }
 
-func (s *winSource) Close() error {
+func (s *winSource) Close() error { return s.close(false) }
+
+// Suspension is not an explicit Stop. Retire the desktop path when safe, but
+// keep the verified adapter prepared so foreground recovery needs no UAC.
+func (s *winSource) CloseForReconnect() error { return s.close(true) }
+
+func (s *winSource) close(reconnect bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -373,7 +379,11 @@ func (s *winSource) Close() error {
 	if s.lease != nil && !winsecure.Enabled() {
 		// Retire the dedicated PnP adapter, not only its desktop path.
 		// Camera, audio, microphone and input devices use separate adapters.
-		s.closeErr = disableVirtualMonitorSafely(context.Background(), s.log)
+		if reconnect {
+			s.closeErr = s.lease.Suspend()
+		} else {
+			s.closeErr = disableVirtualMonitorSafely(context.Background(), s.log)
+		}
 	}
 	if s.mutex != 0 {
 		s.closeErr = errors.Join(s.closeErr, syscall.CloseHandle(s.mutex))

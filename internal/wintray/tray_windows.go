@@ -422,9 +422,10 @@ func Run(o Options) error {
 					call("PostMessageW", hwnd, progress, 0, 0)
 				}
 				var e error
-				if s.AutoStart || (o.ManagedStartup && s.Mode == "extend" && s.Receiver() == "yam" && s.Link() == "USB") {
+				if s.AutoStart || (s.Receiver() == "yam" && s.Link() == "USB") {
 					started := time.Now()
 					e = autoConnect(ch, report, func() error { return startupAttempt(o.Start(s, ch, report), o.ManagedStartup, started, time.Now()) }, 2*time.Second)
+					e = finishReconnectLoop(ch, e, s.Mode == "extend", o.DisconnectMonitor)
 				} else {
 					e = o.Start(s, ch, report)
 				}

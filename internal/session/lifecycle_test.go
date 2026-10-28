@@ -97,7 +97,7 @@ func TestPeerLifecycleEventsEndSession(t *testing.T) {
 			})
 			st, e := Run(context.Background(), h, Options{Continuous: true, FPS: 30})
 			want := map[string]string{"DeviceTerminate": EndDeviceTerminate, "DeviceLocked": EndDeviceLocked, "DeviceBackground": EndDeviceBackground}[name]
-			if e == nil || st.EndReason != want {
+			if e == nil || st.EndReason != want || !ShouldReconnect(st) {
 				t.Fatalf("lifecycle event ignored: reason=%q err=%v", st.EndReason, e)
 			}
 		})

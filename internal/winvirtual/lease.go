@@ -350,13 +350,29 @@ func ExactCaptureMode(modes []Mode, width, height int32) (Mode, error) {
 
 // CloseDetached removes the leased display from the desktop on disconnect.
 // Activation failures still use Close/restore to roll back the original state.
-func (l *Lease) CloseDetached() error {
+func (l *Lease) CloseDetached() error { return l.closeDetached(false) }
+
+// Suspend preserves an existing primary/sole or externally rearranged output.
+// Ordinary extended paths detach while their adapter stays prepared for resume.
+func (l *Lease) Suspend() error { return l.closeDetached(true) }
+
+func (l *Lease) closeDetached(preserveTopology bool) error {
 	if l == nil {
 		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if !l.closed {
+		if preserveTopology {
+			d, err := lookup(context.Background(), l.backend, l.name)
+			if err != nil {
+				return err
+			}
+			if l.preserve || d.Primary || d.Mode != l.applied {
+				l.closed = true
+				return nil
+			}
+		}
 		l.closed = true
 		if err := EnsureSafeDetach(context.Background(), l.backend); err != nil {
 			l.closed = false

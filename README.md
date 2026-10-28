@@ -7,7 +7,7 @@ Reutiliza iPads antiguos como pantallas de computador. El equipo de referencia e
 | Componente | Estado actual |
 | --- | --- |
 | Windows, pantalla compatible | Funciona con la app Yam Display ya instalada en el iPad. El usuario confirmó imagen y mejor fluidez, con unos 45–50 FPS enviados; no es una medición de latencia ni de cuadros presentados. |
-| Windows, entrega actual | **0.16.1 experimental**, un instalador/GUI único con instalación, actualización, reparación, desinstalación, pruebas y diagnóstico. El usuario confirmó imagen del acceso con 0.16.0; la transferencia tras introducir la contraseña falló. 0.16.1 inicia el agente desde el servicio y tolera la preparación del escritorio; esa corrección requiere validación física. |
+| Windows, entrega actual | **0.16.2 experimental**, un instalador/GUI único con instalación, actualización, reparación, desinstalación, pruebas y diagnóstico. El usuario confirmó imagen del acceso con 0.16.0; la transferencia tras introducir la contraseña falló. 0.16.1 inicia el agente desde el servicio y tolera la preparación del escritorio; esa corrección requiere validación física. |
 | Cliente iOS propio | UIKit/Objective-C, ARMv7, mínimo iOS 9.3.5. La versión 0.15.0 está compilada y empaquetada sin firma. Una versión anterior fue firmada e instalada, pero el iPad rechazó la verificación de Apple; la ejecución del cliente propio sigue pendiente de validación. |
 | Touch y teclado propios | Multitouch hasta 10 contactos, teclado Unicode/atajos, apertura tras un toque en un campo nativo editable, modo teclado y trackpad manuales. Compilado ARMv7; prueba física pendiente por verificación Apple. |
 | Cámara y audio propios | Código y pruebas automatizadas disponibles; ejecución física pendiente con el cliente propio. |
@@ -47,6 +47,16 @@ Ctrl+Alt+Del o cambia sus políticas. Las credenciales no se guardan ni aparecen
 los diagnósticos. El GUI muestra estado del servicio y el resultado de transmisión
 previa al acceso. El transporte USB reutiliza el componente Apple ya instalado;
 no se incluye ni se instala iTunes silenciosamente.
+
+Al pasar Yam a segundo plano, bloquear el iPad o perder el transporte, el GUI
+normal queda esperando su regreso. 0.16.2 vuelve a negociar la sesión por USB
+sin exigir «Iniciar», incluso si la conexión original se inició manualmente.
+Durante esa espera se conserva el adaptador preparado; la extensión ordinaria
+se retira del escritorio, pero una salida principal/única conserva su topología.
+«Detener» termina los reintentos y realiza la retirada completa cuando es seguro.
+Los fallos de captura, decodificación y protocolo malformado siguen siendo errores
+visibles; no se ocultan dentro de reintentos de conexión. La recuperación real
+al volver a Yam necesita validación física de esta versión.
 
 ## Código y documentación
 

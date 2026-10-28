@@ -71,6 +71,8 @@ type Stats struct {
 const (
 	EndCanceled         = "canceled"
 	EndPeerTimeout      = "peer_timeout"
+	EndHandshakeTimeout = "handshake_timeout"
+	EndWriteFailure     = "write_failure"
 	EndTransportClosed  = "transport_closed"
 	EndReadFailure      = "read_failure"
 	EndDeviceTerminate  = "device_terminate"
@@ -162,8 +164,6 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 		if ctxErr != nil && err != nil {
 			st.EndReason = EndCanceled
 			err = fmt.Errorf("session ended: %w", ctxErr)
-		} else if st.EndReason == "" && (errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe)) {
-			st.EndReason = EndTransportClosed
 		}
 	}()
 	go func() {
@@ -184,7 +184,14 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 			}
 		}
 	}()
-	send := func(f wire.Frame) error { c.SetWriteDeadline(time.Now().Add(2 * time.Second)); return wire.Write(c, f) }
+	send := func(f wire.Frame) error {
+		c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		err := wire.Write(c, f)
+		if connectionFailure(err) {
+			st.EndReason = EndWriteFailure
+		}
+		return err
+	}
 	text := func(s string) error {
 		log("TX control: " + s)
 		return send(wire.Frame{Type: 101, Payload: wire.Text(s)})
@@ -215,11 +222,11 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 			st.EndReason = EndPeerTimeout
 			return st, errors.New("iPad not responding; display session disconnected")
 		case <-handshakeDeadline:
+			st.EndReason = EndHandshakeTimeout
 			return st, errors.New("iPad handshake timed out: keep the compatible iPad app visible and close other desktop servers")
 		case e := <-failed:
 			st.EndReason = EndReadFailure
-			var networkError *net.OpError
-			if errors.Is(e, io.EOF) || errors.Is(e, io.ErrUnexpectedEOF) || errors.Is(e, net.ErrClosed) || errors.Is(e, io.ErrClosedPipe) || errors.As(e, &networkError) {
+			if connectionFailure(e) {
 				st.EndReason = EndTransportClosed
 			}
 			if errors.Is(e, io.EOF) {
@@ -231,6 +238,10 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 				// Catch already queued read failures before reporting transport completion.
 				select {
 				case e := <-failed:
+					st.EndReason = EndReadFailure
+					if connectionFailure(e) {
+						st.EndReason = EndTransportClosed
+					}
 					return st, fmt.Errorf("iPad final read: %w", e)
 				default:
 				}
@@ -291,6 +302,9 @@ func Run(ctx context.Context, c net.Conn, opt Options) (st Stats, err error) {
 			writeStarted := time.Now()
 			c.SetWriteDeadline(time.Now().Add(2 * time.Second))
 			if e = videoWriter.WriteJPEG(c, b); e != nil {
+				if connectionFailure(e) {
+					st.EndReason = EndWriteFailure
+				}
 				return st, fmt.Errorf("iPad video write: %w", e)
 			}
 			writeElapsed := time.Since(writeStarted)

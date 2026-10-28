@@ -171,3 +171,34 @@ func TestAcquireWithNoPhysicalDisplayEnumerated(t *testing.T) {
 		t.Fatal("sole output detached")
 	}
 }
+
+func TestSuspendPreservesPrimaryAndAllowsReacquire(t *testing.T) {
+	f := fixture()
+	f.displays[1].Primary = true
+	l, err := Acquire(context.Background(), f, 1024, 768)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = l.Suspend(); err != nil {
+		t.Fatal(err)
+	}
+	if !f.displays[1].Mode.Attached || len(f.sets) != 0 {
+		t.Fatal("primary retired during suspension")
+	}
+	if _, err = Acquire(context.Background(), f, 1024, 768); err != nil {
+		t.Fatal("cannot resume", err)
+	}
+}
+func TestSuspendDetachesOrdinaryExtendedPath(t *testing.T) {
+	f := fixture()
+	l, err := Acquire(context.Background(), f, 1024, 768)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = l.Suspend(); err != nil {
+		t.Fatal(err)
+	}
+	if f.displays[1].Mode.Attached {
+		t.Fatal("ordinary extended path stayed active")
+	}
+}

@@ -29,7 +29,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{ManagedInstallation: wininstall.IsInstalledLocation(), OpenInstallation: openManagedSetup, ManagedStartup: wininstall.IsInstalledLocation() && len(os.Args) == 2 && os.Args[1] == "--startup", Title: "Relevo Display 0.16.1", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard, PrepareStop: func() error { return desktop.PrepareVirtualMonitorStop(context.Background(), nil) }})
+	e := wintray.Run(wintray.Options{ManagedInstallation: wininstall.IsInstalledLocation(), OpenInstallation: openManagedSetup, ManagedStartup: wininstall.IsInstalledLocation() && len(os.Args) == 2 && os.Args[1] == "--startup", Title: "Relevo Display 0.16.2", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard, PrepareStop: func() error { return desktop.PrepareVirtualMonitorStop(context.Background(), nil) }})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -37,17 +37,18 @@ func launchDesktopApp() bool {
 }
 
 type compatibleRunOptions struct {
-	Prelogin bool
-	Duration time.Duration
-	Observe  func(session.Stats, desktop.CaptureStatus) string
-	Complete func(session.Stats, desktop.CaptureStatus, bool, error, yaminput.Stats, bool)
+	Prelogin  bool
+	Reconnect bool
+	Duration  time.Duration
+	Observe   func(session.Stats, desktop.CaptureStatus) string
+	Complete  func(session.Stats, desktop.CaptureStatus, bool, error, yaminput.Stats, bool)
 }
 
 func runTraySession(settings wintray.Settings, stop <-chan struct{}, report func(string)) error {
 	if settings.Receiver() == "relevo" {
 		return nativeapp.RunDisplay(settings, stop, report, version)
 	}
-	return runCompatibleSession(settings, stop, report, compatibleRunOptions{})
+	return runCompatibleSession(settings, stop, report, compatibleRunOptions{Reconnect: true})
 }
 func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, report func(string), opt compatibleRunOptions) (err error) {
 	if e := settings.Validate(); e != nil {
@@ -62,6 +63,7 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 	var stats session.Stats
 	var captureStatus desktop.CaptureStatus
 	var cleaned bool
+	var reconnecting bool
 	var inputStats yaminput.Stats
 	var inputAvailable bool
 	if opt.Complete != nil {
@@ -103,7 +105,8 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 			RemoteInputAvailable         bool
 			MonitorDeviceState           *windriver.DeviceState
 			MonitorDeviceStateError      string
-		}{Version: version, Resolution: resolution, Started: started.Format(time.RFC3339), Stats: stats, Events: events, RequestedFPS: settings.FPS, JPEGQuality: settings.Quality, Settings: settings, Encoder: selectedEncoder, CaptureCleanupConfirmed: cleaned, CaptureStatus: captureStatus, RemoteInput: inputStats, RemoteInputAvailable: inputAvailable}
+			RecoverableDisconnect        bool
+		}{Version: version, Resolution: resolution, Started: started.Format(time.RFC3339), Stats: stats, Events: events, RequestedFPS: settings.FPS, JPEGQuality: settings.Quality, Settings: settings, Encoder: selectedEncoder, CaptureCleanupConfirmed: cleaned, RecoverableDisconnect: reconnecting, CaptureStatus: captureStatus, RemoteInput: inputStats, RemoteInputAvailable: inputAvailable}
 		if err != nil {
 			result.Error = err.Error()
 		}
@@ -190,15 +193,28 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 	sourceOpened = true
 	log("capture activation completed")
 	defer func() {
-		report("Desconectando el dispositivo de pantalla virtual… Windows puede solicitar permiso.")
+		if reconnecting {
+			report("Yam no está activa; preparando reconexión automática…")
+		} else {
+			report("Desconectando el dispositivo de pantalla virtual… Windows puede solicitar permiso.")
+		}
 		log("capture cleanup requested")
 		if info, ok := source.(interface{ CaptureStatus() desktop.CaptureStatus }); ok {
 			captureStatus = info.CaptureStatus()
 		}
-		cleanupErr := source.Close()
-		cleaned = cleanupErr == nil
+		var cleanupErr error
+		if reconnecting {
+			if temporary, ok := source.(interface{ CloseForReconnect() error }); ok {
+				cleanupErr = temporary.CloseForReconnect()
+			} else {
+				cleanupErr = source.Close()
+			}
+		} else {
+			cleanupErr = source.Close()
+		}
+		cleaned = cleanupErr == nil && !reconnecting
 		log(fmt.Sprintf("capture cleanup completed: %v", cleanupErr))
-		err = errors.Join(err, cleanupErr)
+		err = compatibleSessionEnd(err, cleanupErr, reconnecting)
 	}()
 	// Input owns only contact/key state. Register after source cleanup so it
 	// releases held input before the display peripheral is removed (LIFO).
@@ -298,6 +314,7 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 		}
 		report(fmt.Sprintf("%.1f / %d FPS · %s · %s · Q%d\nCaptura p95: %.1f ms · escritura p95: %.1f ms", st.ActualFPS, settings.FPS, resolution, encoder, settings.Quality, st.CaptureP95Millis, st.WriteP95Millis) + extra)
 	}, Frame: func(ctx context.Context, _ int) ([]byte, error) { return source.Next(ctx) }})
+	reconnecting = opt.Reconnect && ctx.Err() == nil && session.ShouldReconnect(stats)
 	return normalizeSessionError(ctx, err)
 }
 
