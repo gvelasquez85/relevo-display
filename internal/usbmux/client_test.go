@@ -2,9 +2,11 @@ package usbmux
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"testing"
+	"time"
 
 	"howett.net/plist"
 )
@@ -117,5 +119,28 @@ func TestChooseUSBRejectsAmbiguous(t *testing.T) {
 	}
 	if _, e = Choose([]Device{{ID: 1, Connection: "USB"}}, 2); e == nil {
 		t.Fatal("missing requested device")
+	}
+}
+
+func TestConnectionRejectedBeforeProtocolBytes(t *testing.T) {
+	observed := make(chan int, 1)
+	endpoint := serve(t, func(c net.Conn) {
+		_ = c.SetReadDeadline(time.Now().Add(time.Second))
+		var b [1]byte
+		n, _ := c.Read(b[:])
+		observed <- n
+	})
+	rejected := errors.New("untrusted local transport")
+	client := Client{Endpoint: endpoint, VerifyConnection: func(net.Conn) error { return rejected }}
+	if _, err := client.Devices(); !errors.Is(err, rejected) {
+		t.Fatal(err)
+	}
+	select {
+	case n := <-observed:
+		if n != 0 {
+			t.Fatal("sent protocol to untrusted server")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("connection not closed")
 	}
 }

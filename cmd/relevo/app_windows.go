@@ -17,6 +17,9 @@ import (
 	"relevo/internal/windriver"
 	"relevo/internal/winfocus"
 	"relevo/internal/wininput"
+	"relevo/internal/wininstall"
+	"relevo/internal/winsecure"
+	"relevo/internal/winservice"
 	"relevo/internal/wintray"
 	"relevo/internal/yaminput"
 	"relevo/internal/yamkeyboard"
@@ -26,7 +29,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.5", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard, PrepareStop: func() error { return desktop.PrepareVirtualMonitorStop(context.Background(), nil) }})
+	e := wintray.Run(wintray.Options{ManagedInstallation: wininstall.IsInstalledLocation(), OpenInstallation: openManagedSetup, ManagedStartup: wininstall.IsInstalledLocation() && len(os.Args) == 2 && os.Args[1] == "--startup", Title: "Relevo Display 0.16.0", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard, PrepareStop: func() error { return desktop.PrepareVirtualMonitorStop(context.Background(), nil) }})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -34,6 +37,7 @@ func launchDesktopApp() bool {
 }
 
 type compatibleRunOptions struct {
+	Prelogin bool
 	Duration time.Duration
 	Observe  func(session.Stats, desktop.CaptureStatus) string
 	Complete func(session.Stats, desktop.CaptureStatus, bool, error, yaminput.Stats, bool)
@@ -75,6 +79,9 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 		}
 	}
 	defer func() {
+		if opt.Prelogin {
+			return
+		}
 		dir, e := appstate.ConfigDir()
 		if e != nil {
 			return
@@ -130,7 +137,7 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 	defer cancel()
 	sourceOpened := false
 	defer func() {
-		if !sourceOpened && settings.Mode == "extend" && ctx.Err() != nil {
+		if !opt.Prelogin && !sourceOpened && settings.Mode == "extend" && ctx.Err() != nil {
 			// Stop can arrive during USB discovery, before a capture source
 			// exists. It must still remove an already advertised monitor.
 			cleanupErr := desktop.DisconnectVirtualMonitor(context.Background(), log)
@@ -146,7 +153,18 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 		}
 	}(ctx)
 	// Check the local Apple transport before changing the desktop topology.
+	if !opt.Prelogin {
+		handoffCtx, handoffCancel := context.WithTimeout(ctx, 10*time.Second)
+		handoffErr := winservice.WaitForConsoleHandoff(handoffCtx)
+		handoffCancel()
+		if handoffErr != nil {
+			return fmt.Errorf("esperar transferencia de pantalla desde inicio de sesión: %w", handoffErr)
+		}
+	}
 	client := &usbmux.Client{}
+	if opt.Prelogin {
+		client.VerifyConnection = winsecure.VerifyAppleUSBConnection
+	}
 	devices, e := client.Devices()
 	if e != nil {
 		return fmt.Errorf("%w: No se pudo abrir el servicio USB de Apple. Pulsa Ayuda USB en la ventana para consultar la guía oficial de Apple. Conecta y desbloquea el iPad y acepta Confiar. Detalle: %v", wintray.ErrWaitingForDevice, e)
@@ -193,8 +211,8 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 			extended, extendedErr := wininput.NativeExtendedBackend()
 			inputErr = errors.Join(mouseErr, extendedErr)
 			if inputErr == nil {
-				inputOptions := yaminput.Options{Touch: settings.Touch, Keyboard: settings.Keyboard, NativeGestures: settings.NativeGestures}
-				if settings.Keyboard {
+				inputOptions := yaminput.Options{PointerMouse: opt.Prelogin, Touch: settings.Touch, Keyboard: settings.Keyboard, NativeGestures: settings.NativeGestures}
+				if settings.Keyboard && !opt.Prelogin {
 					keyboardPanel = yamkeyboard.NewWithContext(target, winfocus.ProbeEditable, func(ctx context.Context, t wininput.Target) (func(), error) {
 						return wintray.ShowSystemKeyboardContext(ctx, t)
 					}, report, wintray.SystemKeyboardVisible)

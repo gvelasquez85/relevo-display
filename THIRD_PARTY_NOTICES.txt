@@ -1,6 +1,6 @@
-Relevo Display bundles the Go runtime/standard library, howett.net/plist 1.0.1, github.com/godbus/dbus/v5 v5.1.0, github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e and the MTTVDD driver package identified below.
+Relevo Display bundles the Go runtime/standard library, howett.net/plist 1.0.1, github.com/godbus/dbus/v5 v5.1.0, github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e golang.org/x/sys v0.30.0 and the MTTVDD driver package identified below.
 
-Go license:
+Go runtime/standard library and golang.org/x/sys license:
 
 Copyright 2009 The Go Authors.
 

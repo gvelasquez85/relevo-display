@@ -251,3 +251,21 @@ func TestOptionsDisableInjection(t *testing.T) {
 		t.Fatal(c.Stats())
 	}
 }
+
+func TestPreloginPointerDoesNotDependOnTouchInjection(t *testing.T) {
+	f := &inputFake{failTouch: true}
+	c, err := New(func() (wininput.Target, error) { return inputGeometry(), nil }, f, f, Options{Touch: true, Keyboard: true, PointerMouse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	emit(c, "SingleTap", point(.5, .5))
+	if c.Stats().Errors != 0 {
+		t.Fatal(c.Stats())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.frames) != 0 || len(f.mouse) != 2 || !f.mouse[0].Down || !f.mouse[1].Up {
+		t.Fatal("login click depended on native touch", f.frames, f.mouse)
+	}
+}

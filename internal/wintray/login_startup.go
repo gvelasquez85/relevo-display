@@ -25,3 +25,16 @@ func hasStartupFlag(args []string) bool {
 	}
 	return false
 }
+
+func legacyLoginCommand(command string) bool {
+	const suffix = `" --startup`
+	if !strings.HasPrefix(command, `"`) || !strings.HasSuffix(command, suffix) {
+		return false
+	}
+	path := strings.TrimSuffix(command[1:], suffix)
+	if strings.ContainsAny(path, "\"\x00\r\n") {
+		return false
+	}
+	parts := strings.Split(strings.ReplaceAll(path, "\\", "/"), "/")
+	return len(parts) > 1 && strings.EqualFold(parts[len(parts)-1], "Relevo-Windows.exe")
+}

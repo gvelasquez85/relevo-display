@@ -5,6 +5,7 @@ package wininput
 import (
 	"errors"
 	"fmt"
+	"relevo/internal/winsecure"
 	"runtime"
 	"sync"
 	"syscall"
@@ -31,18 +32,14 @@ func NativeExtendedBackend() (ExtendedBackend, error) {
 			return nil, fmt.Errorf("extended input API unavailable: %w", err)
 		}
 	}
-	touchInitialization.Do(func() {
-		ok, _, e := initializeTouch.Call(10, 3)
-		if ok == 0 {
-			touchInitializationError = fmt.Errorf("InitializeTouchInjection: %v", e)
-		}
-	})
-	if touchInitializationError != nil {
-		return nil, touchInitializationError
-	}
 	return &nativeExtended{}, nil
 }
 func withInputThread(fn func() error) error {
+	release, err := winsecure.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	dpi := extendedUser32.NewProc("SetThreadDpiAwarenessContext")
@@ -73,6 +70,16 @@ func (*nativeExtended) Touch(packets []TouchPacket) error {
 	extendedAPIMu.Lock()
 	defer extendedAPIMu.Unlock()
 	return withInputThread(func() error {
+		touchInitialization.Do(func() {
+			ok, _, e := initializeTouch.Call(10, 3)
+			if ok == 0 {
+				touchInitializationError = fmt.Errorf("InitializeTouchInjection: %v", e)
+			}
+		})
+		if touchInitializationError != nil {
+			return touchInitializationError
+		}
+
 		for retry := 0; retry < 3; retry++ {
 			ok, _, e := injectTouch.Call(uintptr(len(infos)), uintptr(unsafe.Pointer(&infos[0])))
 			runtime.KeepAlive(infos)

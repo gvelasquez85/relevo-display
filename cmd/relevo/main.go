@@ -24,7 +24,7 @@ import (
 	"relevo/internal/wintray"
 )
 
-const version = "0.15.5-experimental"
+const version = "0.16.0-experimental"
 
 func closeCapture(source desktop.Source, prior error) error {
 	if source == nil {
@@ -37,6 +37,10 @@ func closeCapture(source desktop.Source, prior error) error {
 }
 
 func main() {
+	if handleManagedLaunch() {
+		_ = jpegfast.Shutdown()
+		return
+	}
 	status := 0
 	if !((len(os.Args) == 1 || len(os.Args) == 2 && os.Args[1] == "--startup") && launchDesktopApp()) {
 		status = run()

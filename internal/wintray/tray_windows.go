@@ -16,13 +16,16 @@ import (
 )
 
 type Options struct {
-	PrepareStop       func() error
-	OpenKeyboard      func() error
-	DisconnectMonitor func() error
-	OpenYamTests      func(Settings)
-	OpenTests         func()
-	ExportDiagnostic  func() error
-	Title             string
+	ManagedInstallation bool
+	OpenInstallation    func() error
+	ManagedStartup      bool
+	PrepareStop         func() error
+	OpenKeyboard        func() error
+	DisconnectMonitor   func() error
+	OpenYamTests        func(Settings)
+	OpenTests           func()
+	ExportDiagnostic    func() error
+	Title               string
 	// Start blocks until stopped or the display session ends. It runs off the UI thread.
 	Start   func(settings Settings, stop <-chan struct{}, report func(string)) error
 	Install func() error
@@ -179,6 +182,12 @@ func Run(o Options) error {
 	}
 	defer syscall.CloseHandle(syscall.Handle(singleton))
 	settings, loadErr := LoadSettings()
+	if o.ManagedStartup && loadErr == nil {
+		settings.AutoStart = false
+		settings.Mode = "extend"
+		settings.Client = ""
+		settings.Transport = ""
+	}
 	var hwnd, status, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, touchCheck, keyboardCheck, startButton, stopButton, installButton, saveButton, testsButton, yamTestsButton uintptr
 	var clientCombo, transportCombo, lanCombo, nativeGesturesCheck, autoStartCheck uintptr
 	var lanAddresses = lantransport.Addresses()
@@ -310,7 +319,7 @@ func Run(o Options) error {
 		}
 		s.Touch = call("SendMessageW", touchCheck, 0xf0, 0, 0) == 1
 		s.Keyboard = call("SendMessageW", keyboardCheck, 0xf0, 0, 0) == 1
-		s.AutoStart = call("SendMessageW", autoStartCheck, 0xf0, 0, 0) == 1
+		s.AutoStart = !o.ManagedInstallation && call("SendMessageW", autoStartCheck, 0xf0, 0, 0) == 1
 		s.NativeGestures = call("SendMessageW", nativeGesturesCheck, 0xf0, 0, 0) == 1
 		return s
 	}
@@ -400,7 +409,7 @@ func Run(o Options) error {
 					call("PostMessageW", hwnd, progress, 0, 0)
 				}
 				var e error
-				if s.AutoStart {
+				if s.AutoStart || (o.ManagedStartup && s.Mode == "extend" && s.Receiver() == "yam" && s.Link() == "USB") {
 					e = autoConnect(ch, report, func() error { return o.Start(s, ch, report) }, 2*time.Second)
 				} else {
 					e = o.Start(s, ch, report)
@@ -514,6 +523,12 @@ func Run(o Options) error {
 			if !active && !installing && !disconnecting {
 				settings = read()
 				update()
+			}
+		case 33:
+			if o.OpenInstallation != nil {
+				if err := o.OpenInstallation(); err != nil {
+					setText(status, err.Error())
+				}
 			}
 		case 32:
 			old := settings.AutoStart
@@ -659,7 +674,7 @@ func Run(o Options) error {
 		return fmt.Errorf("registrar ventana falló")
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(name)), instance)
-	hwnd = call("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(p(o.Title))), 0x00ca0000, 0x80000000, 0x80000000, 560, 779, 0, 0, instance, 0)
+	hwnd = call("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(p(o.Title))), 0x00ca0000, 0x80000000, 0x80000000, 560, 829, 0, 0, instance, 0)
 	if hwnd == 0 {
 		return fmt.Errorf("crear ventana falló")
 	}
@@ -776,7 +791,14 @@ func Run(o Options) error {
 	child("STATIC", "Cerrar la ventana mantiene el icono junto al reloj. Para cerrar: icono → Salir.", 0, 24, 562, 490, 32, 0)
 	autoStartCheck = childAt("BUTTON", "Conectar al iniciar sesión en Windows (Yam USB)", 0x10003, 24, 674, 490, 26, 32)
 	call("SendMessageW", autoStartCheck, 0xf1, boolValue(settings.AutoStart), 0)
-	childAt("STATIC", "Requiere sesión iniciada; no muestra la pantalla de acceso.", 0, 24, 706, 490, 22, 0)
+	childAt("STATIC", "El instalador administra el servicio y el inicio de Relevo.", 0, 24, 706, 490, 22, 0)
+	if o.ManagedInstallation {
+		setText(autoStartCheck, "Inicio automático administrado por el instalador")
+		call("EnableWindow", autoStartCheck, 0)
+	}
+	if o.OpenInstallation != nil {
+		childAt("BUTTON", "Instalar / actualizar / reparar", 0x10000, 24, 742, 300, 32, 33)
+	}
 	icon = nid{H: hwnd, ID: 1, Flags: 7, Callback: callback, Icon: hi}
 	icon.Size = uint32(unsafe.Sizeof(icon))
 	copy(icon.Tip[:], syscall.StringToUTF16(o.Title))
@@ -791,7 +813,7 @@ func Run(o Options) error {
 	if loadErr != nil {
 		message(hwnd, "No se pudo leer la configuración guardada. Se usan valores predeterminados.\n"+loadErr.Error())
 	}
-	if loadErr == nil && settings.AutoStart && IsStartupLaunch() {
+	if loadErr == nil && (settings.AutoStart || o.ManagedStartup) && IsStartupLaunch() {
 		call("PostMessageW", hwnd, 0x111, 1, 0)
 	}
 	var m msg

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"relevo/internal/wininput"
+	"relevo/internal/winsecure"
 	"runtime"
 	"syscall"
 	"unsafe"
@@ -42,6 +43,11 @@ func InputTarget(source Source) (func() (wininput.Target, error), error) {
 		return 1
 	})
 	validate := func() (wininput.Target, error) {
+		release, bindingErr := winsecure.Enter()
+		if bindingErr != nil {
+			return wininput.Target{}, bindingErr
+		}
+		defer release()
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		runtime.LockOSThread()

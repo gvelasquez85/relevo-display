@@ -23,3 +23,14 @@ func TestStartupLaunchFlagIsExact(t *testing.T) {
 		t.Fatal("startup not recognized")
 	}
 }
+
+func TestLegacyMigrationOnlyRecognizesOwnFixedCommand(t *testing.T) {
+	if !legacyLoginCommand(`"C:\Users\Example\Relevo-Windows.exe" --startup`) {
+		t.Fatal("known portable entry")
+	}
+	for _, s := range []string{`"C:\Other.exe" --startup`, `"C:\Relevo-Windows.exe" --setup`, `"C:\Relevo-Windows.exe" --startup --other`, `C:\Relevo-Windows.exe --startup`} {
+		if legacyLoginCommand(s) {
+			t.Fatal("unrelated entry", s)
+		}
+	}
+}

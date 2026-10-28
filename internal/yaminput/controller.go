@@ -16,6 +16,9 @@ import (
 
 type Options struct {
 	Touch, Keyboard bool
+	// PointerMouse is reserved for the sign-in broker, where contact injection
+	// may be unavailable. The normal desktop retains its tested native touch.
+	PointerMouse bool
 	// NativeGestures reconstructs two synthetic contacts from confirmed aggregate gestures.
 	NativeGestures bool
 	// Tap is called after a successful single tap; enqueue work without blocking.
@@ -43,6 +46,7 @@ type Controller struct {
 	drag, rightHeld, closed, broken, haveTarget bool
 	pinned                                      wininput.Target
 	lastX, lastY                                float64
+	leftHeld                                    bool
 	pans                                        map[string]panState
 	zoom                                        zoomState
 	native                                      nativeGesture
@@ -82,6 +86,11 @@ func (c *Controller) maintainMouseRelease() {
 			if !c.closed && c.native.kind != "" && time.Since(c.native.updated) > 2*time.Second {
 				c.fail()
 			}
+			if !c.closed && c.broken && c.leftHeld {
+				if c.mouse.Send(wininput.Packet{Up: true}) == nil {
+					c.leftHeld = false
+				}
+			}
 			if !c.closed && c.broken && c.rightHeld {
 				if c.mouse.Send(wininput.Packet{RightUp: true}) == nil {
 					c.rightHeld = false
@@ -100,6 +109,13 @@ func (c *Controller) release(final bool) error {
 			err = errors.Join(err, c.extended.Close())
 		} else {
 			err = errors.Join(err, c.extended.RetryRelease())
+		}
+	}
+	if c.leftHeld && c.mouse != nil {
+		e := c.mouse.Send(wininput.Packet{Up: true})
+		err = errors.Join(err, e)
+		if e == nil {
+			c.leftHeld = false
 		}
 	}
 	if c.rightHeld && c.mouse != nil {
@@ -301,6 +317,17 @@ func (c *Controller) handle(event map[string]interface{}, name string, t wininpu
 		}
 		return true, c.mouse.Send(wininput.Packet{Move: true, X: ax, Y: ay})
 	case "SingleTap":
+		if c.options.PointerMouse {
+			c.leftHeld = true
+			if err := c.mouse.Send(wininput.Packet{Move: true, X: ax, Y: ay, Down: true}); err != nil {
+				return true, err
+			}
+			if err := c.mouse.Send(wininput.Packet{Up: true}); err != nil {
+				return true, err
+			}
+			c.leftHeld = false
+			return true, nil
+		}
 		if c.drag {
 			return true, fmt.Errorf("tap during active drag")
 		}
@@ -328,6 +355,9 @@ func (c *Controller) handle(event map[string]interface{}, name string, t wininpu
 		c.rightHeld = false
 		return true, nil
 	case "Dragged":
+		if c.options.PointerMouse {
+			return false, nil
+		} // sign-in uses pointer taps; no synthetic contacts
 		start, ok := inputBool(event, "startOfDrag")
 		if !ok {
 			return true, fmt.Errorf("invalid remote drag phase")

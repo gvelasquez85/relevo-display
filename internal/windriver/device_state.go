@@ -46,10 +46,10 @@ func validateDeviceTransition(g deviceGuard, enabled bool) error {
 	if !g.Owned {
 		return fmt.Errorf("el controlador o su configuración no coincide con el paquete de Relevo")
 	}
-	if g.Primary {
+	if !enabled && g.Primary {
 		return fmt.Errorf("no se puede cambiar el adaptador de la pantalla principal")
 	}
-	if !g.PhysicalAttached {
+	if !enabled && !g.PhysicalAttached {
 		return fmt.Errorf("no se puede cambiar el adaptador sin otra pantalla física activa")
 	}
 	if !enabled && !g.SourceIdentified {

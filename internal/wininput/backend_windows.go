@@ -2,6 +2,7 @@ package wininput
 
 import (
 	"fmt"
+	"relevo/internal/winsecure"
 	"runtime"
 	"syscall"
 	"unsafe"
@@ -16,6 +17,11 @@ func NativeBackend() (Backend, error) {
 	return nativeBackend{}, nil
 }
 func (nativeBackend) Send(p Packet) error {
+	release, err := winsecure.Enter()
+	if err != nil {
+		return err
+	}
+	defer release()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	dll := syscall.NewLazyDLL("user32.dll")

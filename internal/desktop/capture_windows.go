@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"relevo/internal/jpegfast"
 	"relevo/internal/windriver"
+	"relevo/internal/winsecure"
 	"relevo/internal/winvirtual"
 	"runtime"
 	"sync"
@@ -73,6 +74,11 @@ type winSource struct {
 }
 
 func Open(ctx context.Context, opt Options) (source Source, result error) {
+	release, bindingErr := winsecure.Enter()
+	if bindingErr != nil {
+		return nil, bindingErr
+	}
+	defer release()
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := ctx.Err(); err != nil {
@@ -101,7 +107,10 @@ func Open(ctx context.Context, opt Options) (source Source, result error) {
 			if !ready {
 				// A canceled start can finish enabling PnP before cancellation
 				// is observed. Complete its inverse before releasing ownership.
-				cleanupErr := disableVirtualMonitorSafely(context.Background(), opt.Log)
+				var cleanupErr error
+				if !winsecure.Enabled() {
+					cleanupErr = disableVirtualMonitorSafely(context.Background(), opt.Log)
+				}
 				result = errors.Join(result, cleanupErr, syscall.CloseHandle(handle))
 			}
 		}()
@@ -175,6 +184,11 @@ func Open(ctx context.Context, opt Options) (source Source, result error) {
 	return &winSource{rect: monitors[opt.Display-1], width: width, height: height, paused: pause.Bytes(), quality: quality, log: opt.Log}, nil
 }
 func (s *winSource) Next(ctx context.Context) ([]byte, error) {
+	release, bindingErr := winsecure.Enter()
+	if bindingErr != nil {
+		return nil, bindingErr
+	}
+	defer release()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	runtime.LockOSThread()
@@ -356,7 +370,7 @@ func (s *winSource) Close() error {
 	}
 	s.closed = true
 	s.releaseCaptureResources()
-	if s.lease != nil {
+	if s.lease != nil && !winsecure.Enabled() {
 		// Retire the dedicated PnP adapter, not only its desktop path.
 		// Camera, audio, microphone and input devices use separate adapters.
 		s.closeErr = disableVirtualMonitorSafely(context.Background(), s.log)

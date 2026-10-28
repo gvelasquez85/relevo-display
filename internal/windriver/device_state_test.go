@@ -20,7 +20,6 @@ func TestDeviceTransitionSafetyGuards(t *testing.T) {
 		{"primary", false, func(g *deviceGuard) { g.Primary = true }},
 		{"uncorrelated source", false, func(g *deviceGuard) { g.SourceIdentified = false }},
 		{"no physical", false, func(g *deviceGuard) { g.PhysicalAttached = false }},
-		{"enable primary", true, func(g *deviceGuard) { g.Primary = true }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -156,5 +155,19 @@ func TestInstalledPackageMatchesPinnedArchive(t *testing.T) {
 	delete(actual, "MttVDD.dll")
 	if validateInstalledPackageFiles(actual, pinned) == nil {
 		t.Fatal("missing installed DLL accepted")
+	}
+}
+
+func TestOwnedAdapterCanEnableWithoutPhysicalDisplay(t *testing.T) {
+	g := deviceGuard{Count: 1, Owned: true, Primary: true}
+	if err := validateDeviceTransition(g, true); err != nil {
+		t.Fatal(err)
+	}
+	if validateDeviceTransition(g, false) == nil {
+		t.Fatal("sole adapter disabled")
+	}
+	g.Owned = false
+	if validateDeviceTransition(g, true) == nil {
+		t.Fatal("unowned adapter enabled")
 	}
 }

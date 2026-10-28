@@ -14,7 +14,12 @@ import (
 	"howett.net/plist"
 )
 
-type Client struct{ Endpoint string }
+type Client struct {
+	Endpoint string
+	// VerifyConnection runs before any USB protocol bytes are exchanged. The
+	// privileged sign-in broker uses it to authenticate the local Apple service.
+	VerifyConnection func(net.Conn) error
+}
 type Device struct {
 	ID         uint32
 	Connection string
@@ -43,6 +48,12 @@ func (c *Client) dial() (net.Conn, error) {
 	conn, e := net.DialTimeout(network, address, 3*time.Second)
 	if e != nil {
 		return nil, fmt.Errorf("local usbmux service: %w", e)
+	}
+	if c.VerifyConnection != nil {
+		if err := c.VerifyConnection(conn); err != nil {
+			conn.Close()
+			return nil, err
+		}
 	}
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 	return conn, nil

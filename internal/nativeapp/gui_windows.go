@@ -16,7 +16,7 @@ func LaunchGUI() bool {
 	}
 	frames := make(chan []byte, 1)
 	e := wintray.RunLab(wintray.LabOptions{Preview: frames, Embedded: true, InputField: true,
-		Title:  "Relevo Display 0.15.5 · Pruebas del cliente propio",
+		Title:  "Relevo Display 0.16.0 · Pruebas del cliente propio",
 		Intro:  "Requiere nuestra app Relevo verificada y abierta en el iPad. Conexión: " + settings.Link() + ". Usa el campo editable para probar la escritura y las opciones Pantalla/Teclado/Mouse del iPad.",
 		Footer: "Multitouch y teclado requieren el cliente propio; Yam conserva gestos agregados. Cámara y micrófono: pruebas locales, no dispositivos virtuales.",
 		Check: func() (string, error) {

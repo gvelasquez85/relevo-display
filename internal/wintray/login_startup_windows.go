@@ -84,3 +84,42 @@ func SetLoginStartup(enabled bool) error {
 	}
 	return nil
 }
+
+// RemoveLegacyLoginStartup migrates the former portable launch entry. It only
+// removes this product's exact fixed flag/filename; unrelated Run values remain.
+func RemoveLegacyLoginStartup() error {
+	key, _ := syscall.UTF16PtrFromString(loginRunKey)
+	name, _ := syscall.UTF16PtrFromString(loginRunValue)
+	var h syscall.Handle
+	if err := syscall.RegOpenKeyEx(syscall.HKEY_CURRENT_USER, key, 0, syscall.KEY_QUERY_VALUE|syscall.KEY_SET_VALUE, &h); err != nil {
+		if err == syscall.ERROR_FILE_NOT_FOUND {
+			return nil
+		}
+		return err
+	}
+	defer syscall.RegCloseKey(h)
+	var typ, size uint32
+	err := syscall.RegQueryValueEx(h, name, nil, &typ, nil, &size)
+	if err == syscall.ERROR_FILE_NOT_FOUND {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if typ != syscall.REG_SZ || size < 2 || size > 65536 {
+		return nil // Preserve an unrelated or malformed Run entry.
+	}
+	data := make([]uint16, (size+1)/2)
+	if err = syscall.RegQueryValueEx(h, name, nil, &typ, (*byte)(unsafe.Pointer(&data[0])), &size); err != nil {
+		return err
+	}
+	command := syscall.UTF16ToString(data)
+	if !legacyLoginCommand(command) {
+		return nil // Preserve an unrelated or malformed Run entry.
+	}
+	result, _, _ := startupAdvapi.NewProc("RegDeleteValueW").Call(uintptr(h), uintptr(unsafe.Pointer(name)))
+	if result != 0 && syscall.Errno(result) != syscall.ERROR_FILE_NOT_FOUND {
+		return syscall.Errno(result)
+	}
+	return nil
+}
