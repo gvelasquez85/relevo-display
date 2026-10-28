@@ -26,7 +26,7 @@ import (
 )
 
 func launchDesktopApp() bool {
-	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.4", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard, PrepareStop: func() error { return desktop.PrepareVirtualMonitorStop(context.Background(), nil) }})
+	e := wintray.Run(wintray.Options{Title: "Relevo Display 0.15.5", Start: runTraySession, DisconnectMonitor: func() error { return desktop.DisconnectVirtualMonitor(context.Background(), nil) }, OpenYamTests: openYamTests, OpenTests: func() { nativeapp.LaunchGUI() }, ExportDiagnostic: exportLastDiagnostic, OpenKeyboard: openYamKeyboard, PrepareStop: func() error { return desktop.PrepareVirtualMonitorStop(context.Background(), nil) }})
 	if e != nil {
 		wintray.ShowError(e)
 	}
@@ -149,15 +149,15 @@ func runCompatibleSession(settings wintray.Settings, stop <-chan struct{}, repor
 	client := &usbmux.Client{}
 	devices, e := client.Devices()
 	if e != nil {
-		return fmt.Errorf("No se pudo abrir el servicio USB de Apple. Pulsa Ayuda USB en la ventana para consultar la guía oficial de Apple. Conecta y desbloquea el iPad y acepta Confiar. Detalle: %w", e)
+		return fmt.Errorf("%w: No se pudo abrir el servicio USB de Apple. Pulsa Ayuda USB en la ventana para consultar la guía oficial de Apple. Conecta y desbloquea el iPad y acepta Confiar. Detalle: %v", wintray.ErrWaitingForDevice, e)
 	}
 	device, e := usbmux.Choose(devices, 0)
 	if e != nil {
-		return fmt.Errorf("Conecta un solo iPad por USB, desbloquéalo y acepta Confiar. %w", e)
+		return fmt.Errorf("%w: Conecta un solo iPad por USB, desbloquéalo y acepta Confiar. %v", wintray.ErrWaitingForDevice, e)
 	}
 	conn, e := client.Connect(device.ID, 23471)
 	if e != nil {
-		return fmt.Errorf("Abre la app compatible en el iPad y vuelve a iniciar la extensión. %w", e)
+		return fmt.Errorf("%w: Abre la app compatible en el iPad. %v", wintray.ErrWaitingForDevice, e)
 	}
 	defer conn.Close()
 	log("capture activation requested")

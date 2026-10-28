@@ -150,3 +150,24 @@ func TestBorrowedPrimaryDetachedCloseDoesNotFalselyReportRemoval(t *testing.T) {
 		t.Fatal("borrowed primary falsely reported detached")
 	}
 }
+
+// Cold boot may enumerate no physical display path at all, rather than a
+// disconnected path. The sole virtual target must still attach at the origin.
+func TestAcquireWithNoPhysicalDisplayEnumerated(t *testing.T) {
+	f := fixture()
+	f.displays = f.displays[1:]
+	f.displays[0].Mode.Attached = false
+	l, err := Acquire(context.Background(), f, 1024, 768)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Mode.X != 0 || l.Mode.Y != 0 || !l.Mode.Attached || l.Mode.Width != 1024 || l.Mode.Height != 768 {
+		t.Fatal(l.Mode)
+	}
+	if err = l.Close(); err == nil {
+		t.Fatal("removed the only output")
+	}
+	if !f.displays[0].Mode.Attached {
+		t.Fatal("sole output detached")
+	}
+}

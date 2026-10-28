@@ -11,6 +11,7 @@ import (
 )
 
 type Settings struct {
+	AutoStart      bool   `json:"auto_start,omitempty"`
 	Client         string `json:"client,omitempty"`
 	Transport      string `json:"transport,omitempty"`
 	LANAddress     string `json:"lan_address,omitempty"`
@@ -46,6 +47,9 @@ func (s Settings) Link() string {
 	return s.Transport
 }
 func (s Settings) Validate() error {
+	if s.AutoStart && (s.Mode != "extend" || s.Receiver() != "yam" || s.Link() != "USB") {
+		return fmt.Errorf("el inicio automático requiere Extender escritorio y cliente Yam por USB")
+	}
 	if s.Receiver() != "yam" && s.Receiver() != "relevo" {
 		return fmt.Errorf("cliente del iPad no compatible")
 	}

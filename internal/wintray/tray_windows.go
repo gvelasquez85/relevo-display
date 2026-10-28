@@ -180,7 +180,7 @@ func Run(o Options) error {
 	defer syscall.CloseHandle(syscall.Handle(singleton))
 	settings, loadErr := LoadSettings()
 	var hwnd, status, resCombo, fpsCombo, qualityCombo, modeCombo, positionCombo, awakeCheck, touchCheck, keyboardCheck, startButton, stopButton, installButton, saveButton, testsButton, yamTestsButton uintptr
-	var clientCombo, transportCombo, lanCombo, nativeGesturesCheck uintptr
+	var clientCombo, transportCombo, lanCombo, nativeGesturesCheck, autoStartCheck uintptr
 	var lanAddresses = lantransport.Addresses()
 	var active, installing, disconnecting, closing, testsOpen bool
 	var stop chan struct{}
@@ -310,6 +310,7 @@ func Run(o Options) error {
 		}
 		s.Touch = call("SendMessageW", touchCheck, 0xf0, 0, 0) == 1
 		s.Keyboard = call("SendMessageW", keyboardCheck, 0xf0, 0, 0) == 1
+		s.AutoStart = call("SendMessageW", autoStartCheck, 0xf0, 0, 0) == 1
 		s.NativeGestures = call("SendMessageW", nativeGesturesCheck, 0xf0, 0, 0) == 1
 		return s
 	}
@@ -392,12 +393,18 @@ func Run(o Options) error {
 			s := settings
 			update()
 			go func() {
-				e := o.Start(s, ch, func(text string) {
+				report := func(text string) {
 					mu.Lock()
 					progressText = text
 					mu.Unlock()
 					call("PostMessageW", hwnd, progress, 0, 0)
-				})
+				}
+				var e error
+				if s.AutoStart {
+					e = autoConnect(ch, report, func() error { return o.Start(s, ch, report) }, 2*time.Second)
+				} else {
+					e = o.Start(s, ch, report)
+				}
 				mu.Lock()
 				result = e
 				mu.Unlock()
@@ -508,6 +515,27 @@ func Run(o Options) error {
 				settings = read()
 				update()
 			}
+		case 32:
+			old := settings.AutoStart
+			candidate := read()
+			if err := candidate.Validate(); err != nil {
+				message(hwnd, err.Error())
+				call("SendMessageW", autoStartCheck, 0xf1, boolValue(old), 0)
+				return
+			}
+			if err := SetLoginStartup(candidate.AutoStart); err != nil {
+				message(hwnd, err.Error())
+				call("SendMessageW", autoStartCheck, 0xf1, boolValue(old), 0)
+				return
+			}
+			if err := SaveSettings(candidate); err != nil {
+				_ = SetLoginStartup(old)
+				call("SendMessageW", autoStartCheck, 0xf1, boolValue(old), 0)
+				message(hwnd, err.Error())
+				return
+			}
+			settings = candidate
+			setText(status, "Inicio automático guardado. Funciona después de iniciar sesión en Windows; conserva el ejecutable en esta carpeta.")
 		case 8:
 			if active || installing || disconnecting {
 				return
@@ -631,7 +659,7 @@ func Run(o Options) error {
 		return fmt.Errorf("registrar ventana falló")
 	}
 	defer call("UnregisterClassW", uintptr(unsafe.Pointer(name)), instance)
-	hwnd = call("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(p(o.Title))), 0x00ca0000, 0x80000000, 0x80000000, 560, 739, 0, 0, instance, 0)
+	hwnd = call("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(p(o.Title))), 0x00ca0000, 0x80000000, 0x80000000, 560, 779, 0, 0, instance, 0)
 	if hwnd == 0 {
 		return fmt.Errorf("crear ventana falló")
 	}
@@ -746,6 +774,9 @@ func Run(o Options) error {
 	yamTestsButton = child("BUTTON", "Pruebas con Yam", 0x10000, 24, 514, 270, 34, 11)
 	child("BUTTON", "Abrir teclado", 0x10000, 308, 514, 202, 34, 12)
 	child("STATIC", "Cerrar la ventana mantiene el icono junto al reloj. Para cerrar: icono → Salir.", 0, 24, 562, 490, 32, 0)
+	autoStartCheck = childAt("BUTTON", "Conectar al iniciar sesión en Windows (Yam USB)", 0x10003, 24, 674, 490, 26, 32)
+	call("SendMessageW", autoStartCheck, 0xf1, boolValue(settings.AutoStart), 0)
+	childAt("STATIC", "Requiere sesión iniciada; no muestra la pantalla de acceso.", 0, 24, 706, 490, 22, 0)
 	icon = nid{H: hwnd, ID: 1, Flags: 7, Callback: callback, Icon: hi}
 	icon.Size = uint32(unsafe.Sizeof(icon))
 	copy(icon.Tip[:], syscall.StringToUTF16(o.Title))
@@ -759,6 +790,9 @@ func Run(o Options) error {
 	call("UpdateWindow", hwnd)
 	if loadErr != nil {
 		message(hwnd, "No se pudo leer la configuración guardada. Se usan valores predeterminados.\n"+loadErr.Error())
+	}
+	if loadErr == nil && settings.AutoStart && IsStartupLaunch() {
+		call("PostMessageW", hwnd, 0x111, 1, 0)
 	}
 	var m msg
 	for {
@@ -775,4 +809,11 @@ func Run(o Options) error {
 		}
 	}
 	return nil
+}
+
+func boolValue(b bool) uintptr {
+	if b {
+		return 1
+	}
+	return 0
 }
